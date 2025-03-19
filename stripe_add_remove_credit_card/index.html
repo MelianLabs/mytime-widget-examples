@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Form</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Stripe.js -->
+    <script src="https://js.stripe.com/v3/"></script>
+    <style>
+        @keyframes spin { 
+            0% { transform: rotate(0deg); } 
+            100% { transform: rotate(360deg); } 
+        }
+        .login-form {
+            max-width: 400px;
+            margin: 2rem auto;
+            padding: 2rem;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            background-color: #ffffff;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease-in-out;
+        }
+        .login-form:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #495057;
+            font-size: 0.95rem;
+        }
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            outline: none;
+        }
+        input:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+        }
+        input::placeholder {
+            color: #adb5bd;
+        }
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const showNotification = (message, type = 'success') => {
+            const notification = document.createElement('div');
+            notification.style.position = 'fixed';
+            notification.style.top = '20px';
+            notification.style.right = '20px';
+            notification.style.backgroundColor = type === 'success' ? '#28a745' : '#dc3545';
+            notification.style.color = 'white';
+            notification.style.padding = '1rem';
+            notification.style.borderRadius = '4px';
+            notification.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+            notification.style.zIndex = '1000';
+            notification.style.transition = 'opacity 0.3s ease-in-out';
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            // Remove notification after delay
+            const delay = type === 'success' ? 3000 : 5000;
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => {
+                    document.body.removeChild(notification);
+                }, 300);
+            }, delay);
+        };
+
+        // Function to get URL parameters
+        function getUrlParams() {
+            const searchParams = new URLSearchParams(window.location.search);
+            return {
+                amount: searchParams.get('amount'),
+                callback_url: searchParams.get('callback_url'),
+                company_id: searchParams.get('company_id'),
+                domain: searchParams.get('domain'),
+                email: searchParams.get('email'),
+                password: searchParams.get('password')
+            };
+        }
+
+        function App() {
+            const [authData, setAuthData] = React.useState(null);
+            const [userData, setUserData] = React.useState(null);
+            const [companyData, setCompanyData] = React.useState(null);
+            const [deleteLoading, setDeleteLoading] = React.useState(null);
+            const urlParams = getUrlParams();
+            const [stripeSecret, setStripeSecret] = React.useState(null);
+            const [addingCard, setAddingCard] = React.useState(false);
+            const [stripeInstance, setStripeInstance] = React.useState(null);
+            const [loading, setLoading] = React.useState(false);
+
+            React.useEffect(() => {
+                const fetchUserData = async () => {
+                    if (!authData || !authData.token || !authData.domain || !authData.company_id) return;
+                    
+                    setLoading(true);
+                    try {
+                        const [userResponse, companyResponse] = await Promise.all([
+                            axios({
+                                method: 'get',
+                                url: `${authData.domain}/api/mkp/v1/user?company_id=${authData.company_id}`,
+                                headers: {
+                                    'Accept': 'application/json',
+                                    'Content-Type': 'application/json',
+                                    'Authorization': authData.token
+                                }
+                            }),
+                            axios({
+                                method: 'get',
+                                url: `${authData.domain}/api/mkp/v1/companies/${authData.company_id}`,
+                                headers: {
+                                    'Accept': 'application/json',
+                                    'Content-Type': 'application/json',
+                                    'Authorization': authData.token
+                                }
+                            })
+                        ]);
+
+                        setUserData(userResponse.data.user);
+                        setCompanyData(companyResponse.data.company);
+                    } catch (error) {
+                        console.error('Failed to fetch user/company data:', error);
+                        showNotification('Failed to load user data. Please try logging in again.', 'error');
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                fetchUserData();
+            }, [authData]);
+
+            const getStripeSecret = async () => {
+                try {
+                    const callbackUrl = urlParams.callback_url || encodeURIComponent(`${authData.domain}/mkp/${authData.company_id}/profile`);
+                    const amount = urlParams.amount || '100';
+                    const url = `${authData.domain}/api/mkp/v1/user/payment_methods/session?company_id=${authData.company_id}&payment_type=card&add_to_client=true&guest=false&amount=${amount}&callback_url=${callbackUrl}`;
+                    
+                    const response = await axios({
+                        method: 'get',
+                        url: url,
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                            'Authorization': authData.token
+                        }
+                    });
+                    
+                    setStripeSecret({
+                        clientSecret: response.data.client_secret
+                    });
+                    setAddingCard(true);
+                } catch (error) {
+                    console.error('Failed to get Stripe session:', error);
+                    showNotification('Failed to initialize credit card form. Please try again.', 'error');
+                }
+            };
+
+            const StripeForm = () => {
+                const [error, setError] = React.useState(null);
+                const [loading, setLoading] = React.useState(false);
+                const [stripe, setStripe] = React.useState(null);
+                const [elements, setElements] = React.useState(null);
+                const [initializing, setInitializing] = React.useState(true);
+                const cardRef = React.useRef(null);
+
+                React.useEffect(() => {
+                    const initStripe = async () => {
+                        if (!companyData || !companyData.stripe_key) {
+                            setInitializing(false);
+                            return;
+                        }
+
+                        try {
+                            const stripeInstance = Stripe(companyData.stripe_key);
+                            setStripe(stripeInstance);
+                            setElements(stripeInstance.elements());
+                        } catch (err) {
+                            console.error('Failed to initialize Stripe:', err);
+                            setError('Failed to initialize payment form. Please try again.');
+                        } finally {
+                            setInitializing(false);
+                        }
+                    };
+
+                    // Reset state when company data changes
+                    setStripe(null);
+                    setElements(null);
+                    setError(null);
+                    setInitializing(true);
+                    initStripe();
+                }, [companyData]);
+
+                React.useEffect(() => {
+                    if (!elements) return;
+
+                    try {
+                        const card = elements.create('card', {
+                            style: {
+                                base: {
+                                    fontSize: '16px',
+                                    color: '#424770',
+                                    '::placeholder': {
+                                        color: '#aab7c4',
+                                    },
+                                    iconColor: '#666ee8',
+                                },
+                                invalid: {
+                                    color: '#9e2146',
+                                    iconColor: '#fa755a',
+                                },
+                            },
+                            hidePostalCode: true,
+                        });
+
+                        card.mount('#card-element');
+                        const handleChange = (event) => {
+                            setError(event.error ? event.error.message : '');
+                        };
+                        card.addEventListener('change', handleChange);
+                        cardRef.current = card;
+
+                        return () => {
+                            card.removeEventListener('change', handleChange);
+                            card.unmount();
+                            cardRef.current = null;
+                        };
+                    } catch (err) {
+                        console.error('Failed to create card element:', err);
+                        setError('Failed to initialize card form. Please try again.');
+                    }
+                }, [elements]);
+
+                const handleSubmit = async (e) => {
+                    e.preventDefault();
+                    if (!stripe || !elements || !stripeSecret || !stripeSecret.clientSecret || !companyData || !companyData.stripe_key) {
+                        setError('Payment system not initialized. Please try again.');
+                        return;
+                    }
+
+                    setLoading(true);
+                    setError(null);
+
+                    try {
+                        const result = await stripe.confirmCardSetup(stripeSecret.clientSecret, {
+                            payment_method: {
+                                card: cardRef.current,
+                            }
+                        });
+
+                        if (result.error) {
+                            setError(result.error.message);
+                        } else {
+                            setError(null);
+                            // Refresh user data to get the new card with retries
+                            let retries = 0;
+                            const maxRetries = 5;
+                            let userData;
+                            
+                            showNotification('Credit card submitted. Starting verification process...', 'info');
+                            setAddingCard(true); // Keep loading state during verification
+
+                            while (retries < maxRetries) {
+                                try {
+                                    const response = await axios({
+                                        method: 'get',
+                                        url: `${authData.domain}/api/mkp/v1/user?company_id=${authData.company_id}`,
+                                        headers: {
+                                            'Accept': 'application/json',
+                                            'Content-Type': 'application/json',
+                                            'Authorization': authData.token
+                                        }
+                                    });
+                                    userData = response.data.user;
+
+                                    if (userData.credit_cards && userData.credit_cards.length > 0) {
+                                        setUserData(userData);
+                                        setAddingCard(false);
+                                        showNotification('✓ Credit card has been successfully verified and added to your account', 'success');
+                                        return;
+                                    }
+
+                                    retries++;
+                                    if (retries < maxRetries) {
+                                        showNotification(`Verifying card details (${retries + 1}/${maxRetries}). This may take a few moments...`, 'info');
+                                        await new Promise(resolve => setTimeout(resolve, 1000));
+                                    }
+                                } catch (error) {
+                                    console.error('Error fetching user data:', error);
+                                    retries++;
+                                    if (retries < maxRetries) {
+                                        showNotification(`Temporary connection issue. Retrying verification (${retries + 1}/${maxRetries})...`, 'info');
+                                        await new Promise(resolve => setTimeout(resolve, 1000));
+                                    }
+                                }
+                            }
+                            
+                            // If we get here, we've exhausted all retries
+                            setUserData(userData); // Set the last received user data
+                            setAddingCard(false);
+                            showNotification('Your credit card has been processed. Due to high load, it may take a few more moments to appear in your account. No further action is needed.', 'warning');
+                        }
+                    } catch (error) {
+                        const errorMessage = error.response && error.response.data && error.response.data.message ? error.response.data.message : 'An unexpected error occurred. Please try again.';
+                        setError(errorMessage);
+                        console.error('Card setup error:', error);
+                        showNotification(errorMessage, 'error');
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                return (
+                    <form onSubmit={handleSubmit} style={{ maxWidth: '500px', margin: '2rem auto', position: 'relative' }}>
+
+                        {(initializing || loading) && (
+                            <div style={{
+                                textAlign: 'center',
+                                padding: '2rem',
+                                backgroundColor: '#f8f9fa',
+                                borderRadius: '4px',
+                                marginBottom: '1rem'
+                            }}>
+                                <div style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
+                                    {initializing ? 'Initializing payment form...' : 'Saving your card...'}
+                                </div>
+                                <div style={{ 
+                                    width: '40px',
+                                    height: '40px',
+                                    margin: '0 auto',
+                                    border: '3px solid #f3f3f3',
+                                    borderTop: '3px solid #007bff',
+                                    borderRadius: '50%',
+                                    animation: 'spin 1s linear infinite'
+                                }}></div>
+                            </div>
+                        )}
+                        <div style={{ 
+                            padding: '1rem', 
+                            border: '1px solid #e0e0e0',
+                            borderRadius: '8px',
+                            marginBottom: '1rem',
+                            opacity: loading ? '0.5' : '1',
+                            pointerEvents: loading ? 'none' : 'auto',
+                            transition: 'opacity 0.2s ease-in-out',
+                            backgroundColor: '#ffffff',
+                            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+                        }}>
+                            <div style={{ marginBottom: '1rem', color: '#424770', fontSize: '16px' }}>
+                                Enter your card details:
+                            </div>
+                            <div id="card-element"></div>
+                        </div>
+                        {error && (
+                            <div style={{ 
+                                padding: '0.75rem',
+                                marginBottom: '1rem',
+                                backgroundColor: '#fff5f5',
+                                border: '1px solid #dc3545',
+                                borderRadius: '4px',
+                                color: '#dc3545',
+                                fontSize: '14px'
+                            }}>
+                                <strong>Error:</strong> {error}
+                            </div>
+                        )}
+                        <button
+                            type="submit"
+                            disabled={!stripe || loading}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                backgroundColor: loading || !stripe ? '#007bff80' : '#007bff',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: loading || !stripe ? 'not-allowed' : 'pointer',
+                                marginTop: '1rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '0.5rem',
+                                opacity: loading ? 0.7 : 1,
+                                transition: 'opacity 0.2s ease-in-out, background-color 0.2s ease-in-out'
+                            }}
+                        >
+                            {loading ? (
+                                <React.Fragment>
+                                    <div style={{ 
+                                        width: '16px',
+                                        height: '16px',
+                                        border: '2px solid #fff',
+                                        borderTop: '2px solid transparent',
+                                        borderRadius: '50%',
+                                        animation: 'spin 1s linear infinite'
+                                    }}></div>
+                                    <span style={{ marginLeft: '0.5rem' }}>Saving...</span>
+                                </React.Fragment>
+                            ) : initializing ? 'Please wait...' : 'Add Card'}
+                        </button>
+                        <button 
+                            type="button" 
+                            onClick={() => setAddingCard(false)}
+                            disabled={loading}
+                            style={{
+                                marginTop: '0.5rem',
+                                backgroundColor: '#6c757d',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                padding: '0.75rem',
+                                width: '100%',
+                                cursor: loading ? 'not-allowed' : 'pointer',
+                                opacity: loading ? 0.7 : 1,
+                                transition: 'opacity 0.2s ease-in-out'
+                            }}
+                        >
+                            Cancel
+                        </button>
+                    </form>
+                );
+            };
+
+            const handleDeleteCard = async (cardId) => {
+                if (!authData || !cardId) return;
+                
+                // Show confirmation dialog
+                if (!window.confirm('Are you sure you want to delete this credit card?')) {
+                    return;
+                }
+
+                setDeleteLoading(cardId);
+                try {
+                    const url = `${authData.domain}/api/mkp/v1/user/payment_methods/${encodeURIComponent(cardId)}?company_id=${authData.company_id}&payment_type=card&_method=delete`;
+                    
+                    await axios({
+                        method: 'delete',
+                        url: url,
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                            'Authorization': authData.token,
+                        }
+                    });
+
+                    // Update user data by removing the deleted card
+                    setUserData(prevData => ({
+                        ...prevData,
+                        credit_cards: prevData.credit_cards.filter(card => card.id !== cardId)
+                    }));
+
+                    showNotification('Credit card deleted successfully');
+                } catch (error) {
+                    console.error('Failed to delete card:', error);
+                    const errorMessage = error.response && error.response.data && error.response.data.message ? error.response.data.message : 'Failed to delete credit card. Please try again.';
+                    showNotification(errorMessage, 'error');
+                } finally {
+                    setDeleteLoading(null);
+                }
+            };
+
+            const UserProfile = ({ user }) => (
+                <div className="user-profile" style={{
+                    backgroundColor: '#ffffff',
+                    borderRadius: '12px',
+                    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                    border: '1px solid #e0e0e0',
+                    animation: 'slideIn 0.4s ease-out'
+                }}>
+                <style>{'@keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }'}</style>
+                    <h2 style={{
+                        color: '#2d3748',
+                        borderBottom: '2px solid #e0e0e0',
+                        paddingBottom: '1rem',
+                        marginBottom: '2rem'
+                    }}>Welcome, {user.first_name} {user.last_name}</h2>
+                    <div className="credit-cards">
+                        <h3 style={{
+                            color: '#4a5568',
+                            fontSize: '1.5rem',
+                            marginBottom: '1.5rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem'
+                        }}>
+                            <span style={{
+                                backgroundColor: '#ebf4ff',
+                                color: '#4299e1',
+                                padding: '0.5rem',
+                                borderRadius: '8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '32px',
+                                height: '32px'
+                            }}>💳</span>
+                            Credit Cards
+                        </h3>
+                        {user.credit_cards.length > 0 ? (
+                            <ul style={{ 
+                                listStyle: 'none', 
+                                padding: 0,
+                                display: 'grid',
+                                gap: '1rem',
+                                animation: 'fadeIn 0.3s ease-in-out'
+                            }}>
+                            <style>{'@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }'}</style>
+                                {user.credit_cards.map(card => (
+                                    <li key={card.id} style={{ 
+                                        padding: '1.25rem',
+                                        border: '1px solid #e0e0e0',
+                                        borderRadius: '8px',
+                                        marginBottom: '1rem',
+                                        position: 'relative',
+                                        backgroundColor: '#ffffff',
+                                        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                        transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+                                        ':hover': {
+                                            transform: 'translateY(-2px)',
+                                            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                                        }
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                            <span style={{ 
+                                                backgroundColor: '#f8f9fa',
+                                                padding: '0.25rem 0.5rem',
+                                                borderRadius: '4px',
+                                                marginRight: '0.5rem',
+                                                fontSize: '0.9rem',
+                                                color: '#495057',
+                                                fontWeight: 'bold'
+                                            }}>{card.brand}</span>
+                                            <span style={{ color: '#6c757d' }}>ending in {card.last4}</span>
+                                        </div>
+                                        <div style={{ color: '#6c757d', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
+                                            Expires: {card.exp_month}/{card.exp_year}
+                                        </div>
+                                        <div style={{ color: '#495057' }}>{card.name}</div>
+                                        <button
+                                            onClick={() => handleDeleteCard(card.id)}
+                                            disabled={deleteLoading === card.id}
+                                            style={{
+                                                position: 'absolute',
+                                                top: '1rem',
+                                                right: '1rem',
+                                                backgroundColor: deleteLoading === card.id ? '#dc354580' : '#dc3545',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                padding: '0.5rem 0.75rem',
+                                                cursor: deleteLoading === card.id ? 'not-allowed' : 'pointer',
+                                                width: 'auto',
+                                                fontSize: '0.9rem',
+                                                transition: 'background-color 0.2s ease-in-out',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem'
+                                            }}
+                                        >
+                                            {deleteLoading === card.id ? (
+                                                <React.Fragment>
+                                                    <div style={{ 
+                                                        width: '14px',
+                                                        height: '14px',
+                                                        border: '2px solid #fff',
+                                                        borderTop: '2px solid transparent',
+                                                        borderRadius: '50%',
+                                                        animation: 'spin 1s linear infinite'
+                                                    }}></div>
+                                                    Deleting...
+                                                </React.Fragment>
+                                            ) : (
+                                                'Delete'
+                                            )}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <div style={{
+                                textAlign: 'center',
+                                padding: '2rem',
+                                backgroundColor: '#f8fafc',
+                                borderRadius: '12px',
+                                border: '2px dashed #e2e8f0'
+                            }}>
+                                <div style={{
+                                    width: '64px',
+                                    height: '64px',
+                                    backgroundColor: '#ebf4ff',
+                                    borderRadius: '50%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    margin: '0 auto 1rem auto',
+                                    fontSize: '2rem'
+                                }}>💳</div>
+                                <p style={{
+                                    color: '#4a5568',
+                                    fontSize: '1.1rem',
+                                    marginBottom: '0.5rem'
+                                }}>No credit cards on file</p>
+                                <p style={{
+                                    color: '#718096',
+                                    fontSize: '0.95rem',
+                                    marginBottom: '1.5rem'
+                                }}>Add a credit card to get started</p>
+                                {urlParams.amount && (
+                                    <p style={{
+                                        color: '#4a5568',
+                                        fontSize: '0.9rem',
+                                        marginBottom: '1rem',
+                                        backgroundColor: '#f7fafc',
+                                        padding: '0.5rem 1rem',
+                                        borderRadius: '6px',
+                                        display: 'inline-block'
+                                    }}>
+                                        Amount to be charged: ${(parseInt(urlParams.amount) / 100).toFixed(2)}
+                                    </p>
+                                )}
+                                {!addingCard ? (
+                                    <button
+                                        onClick={getStripeSecret}
+                                        style={{
+                                            backgroundColor: '#28a745',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            padding: '1rem 1.5rem',
+                                            cursor: 'pointer',
+                                            width: 'auto',
+                                            marginTop: '1.5rem',
+                                            fontSize: '1rem',
+                                            fontWeight: '500',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            transition: 'all 0.2s ease-in-out',
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                                            ':hover': {
+                                                backgroundColor: '#218838',
+                                                transform: 'translateY(-1px)',
+                                                boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                                            }
+                                        }}
+                                    >
+                                        <span style={{ fontSize: '1.25rem', marginRight: '0.5rem' }}>+</span>
+                                        Add New Card
+                                    </button>
+                                ) : (
+                                    <StripeForm />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+
+            function LoginForm() {
+                const [formData, setFormData] = React.useState({
+                    domain: urlParams.domain || '',
+                    company_id: urlParams.company_id || '',
+                    email: urlParams.email || '',
+                    password: urlParams.password || ''
+                });
+                const [error, setError] = React.useState(null);
+                const [isLoggingIn, setIsLoggingIn] = React.useState(false);
+
+                const performLogin = function(loginData) {
+                    return new Promise(function(resolve, reject) {
+                        const domain = loginData.domain.trim();
+                        const url = domain + '/api/mkp/v1/sessions';
+                    
+                        axios({
+                            method: 'post',
+                            url: url,
+                            data: {
+                                email: loginData.email,
+                                password: loginData.password,
+                                company_id: parseInt(loginData.company_id),
+                                recaptcha_token: null
+                            },
+                            headers: {
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json'
+                            }
+                        }).then(function(response) {
+                            const token = response.data.user.authentication_token;
+                            console.log('Login successful:', response.data);
+                            setError(null);
+                            
+                            setAuthData({
+                                token: token,
+                                company_id: loginData.company_id,
+                                domain: loginData.domain
+                            });
+                            
+                            showNotification('Login successful! Welcome back.');
+                            resolve(true);
+                        }).catch(function(error) {
+                            console.error('Login failed:', error);
+                            const errorMessage = (error.response && error.response.data && error.response.data.error) || 'Login failed. Please check your credentials.';
+                            setError(errorMessage);
+                            showNotification(errorMessage, 'error');
+                            reject(error);
+                        });
+                    });
+                };
+
+                // Auto-submit the form if all required fields are present in URL
+                React.useEffect(function() {
+                    let mounted = true;
+                    var autoLogin = function() {
+                        if (urlParams.domain && urlParams.company_id && urlParams.email && urlParams.password) {
+                            if (mounted) setIsLoggingIn(true);
+                            performLogin({
+                                domain: urlParams.domain,
+                                company_id: urlParams.company_id,
+                                email: urlParams.email,
+                                password: urlParams.password
+                            }).then(function() {
+                                if (mounted) setIsLoggingIn(false);
+                            }).catch(function(error) {
+                                console.error('Auto-login failed:', error);
+                                if (mounted) {
+                                    setError('Auto-login failed. Please try logging in manually.');
+                                    showNotification('Auto-login failed. Please try logging in manually.', 'error');
+                                    setIsLoggingIn(false);
+                                }
+                            });
+                        }
+                    };
+                    autoLogin();
+                    return function() { mounted = false; };
+                }, []);
+
+            const handleChange = function(e) {
+                const { name, value } = e.target;
+                setFormData(function(prev) {
+                    return Object.assign({}, prev, {
+                        [name]: value
+                    });
+                });
+                setError(null);
+            };
+
+            const handleSubmit = function(e) {
+                e.preventDefault();
+                setError(null);
+                setIsLoggingIn(true);
+                performLogin(formData).catch(function() {
+                    // Error is already handled in performLogin
+                }).finally(function() {
+                    setIsLoggingIn(false);
+                });
+            };
+
+            return (
+                <div className="login-form" style={{ position: 'relative', maxWidth: '400px', margin: '2rem auto', padding: '2rem', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                    <h2 style={{ marginBottom: '1.5rem', color: '#2d3748', textAlign: 'center' }}>Login</h2>
+                    {isLoggingIn && (
+                        <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 10,
+                            borderRadius: '8px'
+                        }}>
+                            <div style={{
+
+                                width: '40px',
+                                height: '40px',
+                                border: '3px solid #f3f3f3',
+                                borderTop: '3px solid #007bff',
+                                borderRadius: '50%',
+                                animation: 'spin 1s linear infinite',
+                                marginBottom: '1rem'
+                            }}></div>
+                            <div style={{ color: '#6c757d' }}>
+                                {isLoggingIn ? 'Logging in...' : 'Loading user data...'}
+                            </div>
+                        </div>
+                    )}
+                    {error && (
+                        <div style={{ 
+                            padding: '0.75rem',
+                            marginBottom: '1rem',
+                            backgroundColor: '#fff5f5',
+                            border: '1px solid #dc3545',
+                            borderRadius: '4px',
+                            color: '#dc3545',
+                            fontSize: '14px'
+                        }}>
+                            <strong>Error:</strong> {error}
+                        </div>
+                    )}
+                    <form onSubmit={handleSubmit}>
+                        <div className="form-group">
+                            <label htmlFor="domain">Domain:</label>
+                            <input
+                                type="text"
+                                id="domain"
+                                name="domain"
+                                value={formData.domain}
+                                onChange={handleChange}
+                                placeholder="https://www.mytime.com"
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="company_id">Company ID:</label>
+                            <input
+                                type="number"
+                                id="company_id"
+                                name="company_id"
+                                value={formData.company_id}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="email">Email:</label>
+                            <input
+                                type="email"
+                                id="email"
+                                name="email"
+                                value={formData.email}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="password">Password:</label>
+                            <input
+                                type="password"
+                                id="password"
+                                name="password"
+                                value={formData.password}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                        <button 
+                            type="submit" 
+                            disabled={isLoggingIn}
+                            style={{ 
+                                backgroundColor: isLoggingIn ? '#ccc' : '#007bff',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                padding: '0.75rem',
+                                width: '100%',
+                                cursor: isLoggingIn ? 'not-allowed' : 'pointer',
+                                opacity: isLoggingIn ? 0.7 : 1,
+                                transition: 'opacity 0.2s ease-in-out, background-color 0.2s ease-in-out'
+                            }}
+                        >
+                            {isLoggingIn ? 'Logging in...' : 'Login'}
+                        </button>
+                    </form>
+                </div>
+            );
+        }
+
+
+            return userData ? <UserProfile user={userData} /> : <LoginForm />;
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
