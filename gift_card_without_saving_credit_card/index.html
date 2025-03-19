@@ -88,8 +88,8 @@
             const handleLocationSelect = async (location) => {
                 setSelectedLocation(location);
                 // Reset Stripe elements when location changes
-                if (stripeElements && stripeElements.card) {
-                    stripeElements.card.unmount();
+                if (stripeElements && stripeElements.paymentElement) {
+                    stripeElements.paymentElement.unmount();
                     setStripeElements(null);
                 }
             };
@@ -213,19 +213,24 @@
                                 callback_url: callbackUrl,
                                 payment_type: 'card',
                                 add_to_client: false,
-                                guest: true,
-                                amount: Math.round(parseFloat(giftCardForm.amount) * 100),
+                                guest: false,
+                                amount: giftCardForm.amount,
                                 stripe_account_id: selectedLocation.payment_account.stripe_account_id
                             },
                             headers: {
-                                'gauthorization': guestResponse.data.user.guest_token
+                                'gauthorization': guestResponse.data.user.guest_token,
+                                'Content-Type': 'application/json'
                             }
                         }
                     );
 
                     console.log('Payment session response:', sessionResponse.data);
 
-                    // Step 4: Submit card details
+                    if (!sessionResponse.data || !sessionResponse.data.client_secret) {
+                        throw new Error('Invalid payment session response');
+                    }
+
+                    // Step 4: Submit payment form
                     const { error: submitError } = await stripeElements.elements.submit();
                     if (submitError) {
                         throw submitError;
@@ -237,34 +242,54 @@
                             elements: stripeElements.elements,
                             clientSecret: sessionResponse.data.client_secret,
                             confirmParams: {
-                                return_url: window.location.href,
-                                payment_method_data: {
-                                    billing_details: {
-                                        name: giftCardForm.from,
-                                        email: giftCardForm.sender_email
-                                    }
-                                }
+                                return_url: location.href,
+                                expand: ['payment_method'],
                             },
-                            redirect: 'if_required',
+                            redirect: 'if_required'
                         });
-
+                        
                         if (paymentError) {
-                            // Handle specific Stripe error types
-                            switch (paymentError.type) {
-                                case 'card_error':
-                                    throw new Error(`Card error: ${paymentError.message}`);
-                                case 'validation_error':
-                                    throw new Error(`Validation error: ${paymentError.message}`);
-                                case 'invalid_request_error':
-                                    throw new Error('Invalid payment request. Please try again.');
-                                default:
-                                    throw new Error(paymentError.message || 'Payment failed. Please try again.');
-                            }
+                            throw new Error(paymentError.message || 'Payment failed. Please try again.');
                         }
 
-                        console.log('Payment successful:', paymentIntent);
+                        if (!paymentIntent) {
+                            throw new Error('No payment intent returned from Stripe');
+                        }
 
-                        const successMessage = `Payment processed successfully!\nGift Card ID: ${giftCardResponse.data.id}\nAmount: $${giftCardForm.amount}\nRecipient: ${giftCardForm.to_first_name} ${giftCardForm.to_last_name}\n\nA confirmation email will be sent to ${giftCardForm.recipient_email}`;
+                        // Complete gift card purchase with payment intent
+                        const completeResponse = await axios.post(
+                            baseUrlWithoutTrailingSlash + '/api/mkp/v1/gift_card_purchases/' + giftCardResponse.data.id + '/complete',
+                            {
+                                payment_intent: paymentIntent
+                            },
+                            {
+                                headers: {
+                                    'gauthorization': guestResponse.data.user.guest_token,
+                                    'Content-Type': 'application/json'
+                                }
+                            }
+                        );
+
+                        if (!completeResponse || !completeResponse.data) {
+                            throw new Error('Failed to complete gift card purchase');
+                        }
+
+                        const giftCard = completeResponse.data;
+                        const tickets = giftCard.tickets;
+                        if (!tickets || tickets.length === 0) {
+                            throw new Error('No ticket information found');
+                        }
+
+                        const successMessage = 'Payment processed successfully!\n\n' +
+                            'Gift Card Details:\n' +
+                            '- Code: ' + giftCard.code + '\n' +
+                            '- Amount: $' + giftCard.total_price + '\n' +
+                            '- Status: ' + giftCard.status + '\n' +
+                            '- Recipient: ' + giftCard.recipient_first_name + ' ' + giftCard.recipient_last_name + '\n' +
+                            '- Email: ' + giftCard.recipient_email + '\n' +
+                            '- Purchase ID: ' + giftCard.id + '\n' +
+                            '- Ticket UUID: ' + tickets[0].uuid + '\n\n' +
+                            'A confirmation email will be sent to ' + giftCard.recipient_email;
                         alert(successMessage);
                     
                         // Reset form after successful purchase
@@ -313,8 +338,8 @@
                     }
 
                     // Clear the card element to allow retrying
-                    if (stripeElements && stripeElements.card) {
-                        stripeElements.card.clear();
+                    if (stripeElements && stripeElements.paymentElement) {
+                        stripeElements.paymentElement.clear();
                     }
                 } finally {
                     setIsProcessingPayment(false);
@@ -334,37 +359,19 @@
                     }
 
                     const stripe = Stripe(stripeKey);
-                    const elements = stripe.elements();
+                    const elements = stripe.elements({
+                        mode: 'payment',
+                        amount: Math.round(amount * 100),
+                        captureMethod: 'manual',
+                        onBehalfOf: selectedLocation.payment_account.stripe_account_id,
+                        currency: companyData.currency || 'usd',
+                        paymentMethodTypes: ['card'],
+                        appearance: {/* ...*/},
+                    });
                     
-                    // Create card element with styling options
-                    const card = elements.create('card', {
-                        style: {
-                            base: {
-                                fontSize: '16px',
-                                color: '#32325d',
-                                '::placeholder': {
-                                    color: '#aab7c4'
-                                }
-                            },
-                            invalid: {
-                                color: '#fa755a',
-                                iconColor: '#fa755a'
-                            }
-                        }
-                    });
-                    card.mount('#card-element');
-
-                    // Handle validation errors
-                    card.on('change', (event) => {
-                        const displayError = document.getElementById('card-errors');
-                        if (event.error) {
-                            displayError.textContent = event.error.message;
-                        } else {
-                            displayError.textContent = '';
-                        }
-                    });
-
-                    setStripeElements({ stripe, elements, card });
+                    const paymentElement = elements.create('payment');
+                    paymentElement.mount('#card-element');
+                    setStripeElements({ stripe, elements, paymentElement });
                 } catch (error) {
                     console.error('Stripe initialization error:', error);
                     setError(error.message);
@@ -390,8 +397,8 @@
                 setUserData(null);
                 
                 // Reset Stripe elements if they exist
-                if (stripeElements && stripeElements.card) {
-                    stripeElements.card.unmount();
+                if (stripeElements && stripeElements.paymentElement) {
+                    stripeElements.paymentElement.unmount();
                     setStripeElements(null);
                 }
 

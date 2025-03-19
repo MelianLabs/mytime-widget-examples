@@ -1,0 +1,7 @@
+do not use ?. since we use babel in browser
+react app with tailwind
+minimum changes possible
+use axios for api calls
+use stripe.js for payment processing
+use payment elements from stripe
+create as little custom css as possible
