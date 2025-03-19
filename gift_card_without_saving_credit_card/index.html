@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Booking</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://js.stripe.com/v3/"></script>
+    <style>
+        .StripeElement {
+            background-color: white;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+        .StripeElement--focus {
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 0 0 2px rgba(59, 130, 246, 0.5);
+        }
+        .StripeElement--invalid {
+            border-color: #ef4444;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [formData, setFormData] = React.useState({
+                baseUrl: '',
+                companyId: ''
+            });
+            const [companyData, setCompanyData] = React.useState(null);
+            const [locations, setLocations] = React.useState([]);
+            const [selectedLocation, setSelectedLocation] = React.useState(null);
+            const [error, setError] = React.useState('');
+            const [giftCardPurchase, setGiftCardPurchase] = React.useState(null);
+            const [guestData, setGuestData] = React.useState(null);
+            const [userData, setUserData] = React.useState(null);
+            const [stripeElements, setStripeElements] = React.useState(null);
+            const [isProcessingPayment, setIsProcessingPayment] = React.useState(false);
+           
+            React.useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const baseUrl = params.get('base_url');
+                const companyId = params.get('company_id');
+                const gcId = params.get('gc_id');
+                const paymentStatus = params.get('payment_status');
+                
+                if (baseUrl && companyId) {
+                    setFormData({
+                        baseUrl,
+                        companyId
+                    });
+                }
+
+                // Handle payment status from URL parameters
+                if (paymentStatus === 'success' && gcId) {
+                    alert('Payment completed successfully! Your gift card has been purchased.');
+                    // Keep only base_url and company_id parameters
+                    const newUrl = new URL(window.location.href);
+                    const newParams = new URLSearchParams();
+                    if (baseUrl) newParams.set('base_url', baseUrl);
+                    if (companyId) newParams.set('company_id', companyId);
+                    newUrl.search = newParams.toString();
+                    window.history.replaceState({}, '', newUrl);
+                } else if (paymentStatus === 'failed') {
+                    setError('Payment failed. Please try again.');
+                    // Keep only base_url and company_id parameters
+                    const newUrl = new URL(window.location.href);
+                    const newParams = new URLSearchParams();
+                    if (baseUrl) newParams.set('base_url', baseUrl);
+                    if (companyId) newParams.set('company_id', companyId);
+                    newUrl.search = newParams.toString();
+                    window.history.replaceState({}, '', newUrl);
+                }
+            }, []);
+
+            
+            const handleLocationSelect = async (location) => {
+                setSelectedLocation(location);
+                // Reset Stripe elements when location changes
+                if (stripeElements && stripeElements.card) {
+                    stripeElements.card.unmount();
+                    setStripeElements(null);
+                }
+            };
+
+            const handleAmountChange = (e) => {
+                const newAmount = e.target.value;
+                setGiftCardForm(prev => ({ ...prev, amount: newAmount }));
+                
+                // Only initialize Stripe if we have all required data
+                if (companyData && companyData.stripe_key && 
+                    selectedLocation && selectedLocation.payment_account && selectedLocation.payment_account.stripe_account_id && 
+                    newAmount && 
+                    parseFloat(newAmount) > 0) {
+                    initializeStripe(companyData.stripe_key, parseFloat(newAmount));
+                } else if (stripeElements && stripeElements.card) {
+                    // Reset Stripe elements if amount is invalid
+                    stripeElements.card.unmount();
+                    setStripeElements(null);
+                }
+            };
+
+            const [giftCardForm, setGiftCardForm] = React.useState({
+                from: '',
+                to_first_name: '',
+                to_last_name: '',
+                sender_email: '',
+                recipient_email: '',
+                amount: '',
+                recipient_note: ''
+            });
+
+            const validateForm = () => {
+                if (!companyData) {
+                    return 'Company data not loaded. Please try again.';
+                }
+                if (!selectedLocation) {
+                    return 'Please select a location.';
+                }
+                if (!selectedLocation.payment_account || !selectedLocation.payment_account.stripe_account_id) {
+                    return 'Selected location is not configured for payments.';
+                }
+                if (!giftCardForm.from.trim()) {
+                    return 'Sender name is required';
+                }
+                if (!giftCardForm.to_first_name.trim()) {
+                    return 'Recipient first name is required';
+                }
+                if (!giftCardForm.to_last_name.trim()) {
+                    return 'Recipient last name is required';
+                }
+                if (!giftCardForm.sender_email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(giftCardForm.sender_email)) {
+                    return 'Valid sender email is required';
+                }
+                if (!giftCardForm.recipient_email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(giftCardForm.recipient_email)) {
+                    return 'Valid recipient email is required';
+                }
+                if (!giftCardForm.amount || parseFloat(giftCardForm.amount) <= 0) {
+                    return 'Valid amount is required';
+                }
+                if (!companyData.stripe_key) {
+                    return 'Company is not configured for payments.';
+                }
+                return null;
+            };
+
+            const handleGiftCardSubmit = async (e) => {
+                e.preventDefault();
+                if (!stripeElements) {
+                    setError('Payment not initialized properly. Please try again.');
+                    return;
+                }
+
+                const validationError = validateForm();
+                if (validationError) {
+                    setError(validationError);
+                    return;
+                }
+
+                setIsProcessingPayment(true);
+                setError('');
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    
+                    // Step 1: Register guest
+                    const guestResponse = await axios.post(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/guests`, {
+                        email: giftCardForm.sender_email,
+                        associate_clients: false,
+                        company_id: formData.companyId,
+                        time_zone: selectedLocation.time_zone,
+                        recaptcha_token: null
+                    });
+                    
+                    console.log('Guest registration response:', guestResponse.data);
+                    setGuestData(guestResponse.data);
+
+                    // Step 2: Create gift card purchase
+                    const giftCardResponse = await axios.post(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/gift_card_purchases`, {
+                        amount: parseFloat(giftCardForm.amount),
+                        sender_name: giftCardForm.from,
+                        recipient_email: giftCardForm.recipient_email,
+                        recipient_first_name: giftCardForm.to_first_name,
+                        recipient_last_name: giftCardForm.to_last_name,
+                        recipient_note: giftCardForm.recipient_note,
+                        location_id: selectedLocation.id,
+                        company_id: formData.companyId,
+                        expiration_end_date: null,
+                        email_to_be_sent_at: null
+                    });
+
+                    setGiftCardPurchase(giftCardResponse.data);
+                    console.log('Gift card purchase created:', giftCardResponse.data);
+
+                    // Step 3: Get payment session
+                    const callbackUrl = encodeURIComponent(`${window.location.origin}${window.location.pathname}?base_url=${encodeURIComponent(formData.baseUrl)}&company_id=${formData.companyId}&gc_id=${giftCardResponse.data.id}`);
+                    const sessionResponse = await axios.get(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/payment_methods/session`,
+                        {
+                            params: {
+                                company_id: formData.companyId,
+                                callback_url: callbackUrl,
+                                payment_type: 'card',
+                                add_to_client: false,
+                                guest: true,
+                                amount: Math.round(parseFloat(giftCardForm.amount) * 100),
+                                stripe_account_id: selectedLocation.payment_account.stripe_account_id
+                            },
+                            headers: {
+                                'gauthorization': guestResponse.data.user.guest_token
+                            }
+                        }
+                    );
+
+                    console.log('Payment session response:', sessionResponse.data);
+
+                    // Step 4: Submit card details
+                    const { error: submitError } = await stripeElements.elements.submit();
+                    if (submitError) {
+                        throw submitError;
+                    }
+
+                    // Step 5: Confirm payment with Stripe
+                    try {
+                        const { error: paymentError, paymentIntent } = await stripeElements.stripe.confirmPayment({
+                            elements: stripeElements.elements,
+                            clientSecret: sessionResponse.data.client_secret,
+                            confirmParams: {
+                                return_url: window.location.href,
+                                payment_method_data: {
+                                    billing_details: {
+                                        name: giftCardForm.from,
+                                        email: giftCardForm.sender_email
+                                    }
+                                }
+                            },
+                            redirect: 'if_required',
+                        });
+
+                        if (paymentError) {
+                            // Handle specific Stripe error types
+                            switch (paymentError.type) {
+                                case 'card_error':
+                                    throw new Error(`Card error: ${paymentError.message}`);
+                                case 'validation_error':
+                                    throw new Error(`Validation error: ${paymentError.message}`);
+                                case 'invalid_request_error':
+                                    throw new Error('Invalid payment request. Please try again.');
+                                default:
+                                    throw new Error(paymentError.message || 'Payment failed. Please try again.');
+                            }
+                        }
+
+                        console.log('Payment successful:', paymentIntent);
+
+                        const successMessage = `Payment processed successfully!\nGift Card ID: ${giftCardResponse.data.id}\nAmount: $${giftCardForm.amount}\nRecipient: ${giftCardForm.to_first_name} ${giftCardForm.to_last_name}\n\nA confirmation email will be sent to ${giftCardForm.recipient_email}`;
+                        alert(successMessage);
+                    
+                        // Reset form after successful purchase
+                        setGiftCardForm({
+                            from: '',
+                            to_first_name: '',
+                            to_last_name: '',
+                            sender_email: '',
+                            recipient_email: '',
+                            amount: '',
+                            recipient_note: ''
+                        });
+                        
+                        if (stripeElements && stripeElements.card) {
+                            stripeElements.card.clear();
+                        }
+                    } catch (stripeError) {
+                        console.error('Stripe payment error:', stripeError);
+                        throw stripeError;
+                    }
+                } catch (err) {
+                    console.error('Payment/Purchase error:', err);
+                    let errorMessage = 'An error occurred during the payment process.';
+                    
+                    if (err.response) {
+                        // Handle MyTime API error responses
+                        if (err.response.data) {
+                            errorMessage = err.response.data.message || err.response.data.error || errorMessage;
+                            if (err.response.status === 401) {
+                                errorMessage = 'Your session has expired. Please try again.';
+                            } else if (err.response.status === 400) {
+                                errorMessage = 'Invalid request. Please check your input and try again.';
+                            }
+                        }
+                    } else if (err.message) {
+                        // Already formatted error message from Stripe error handling
+                        errorMessage = err.message;
+                    }
+
+                    setError(errorMessage);
+                    
+                    // If we created a gift card but payment failed, we should note this
+                    if (giftCardResponse && giftCardResponse.data) {
+                        console.log('Note: Gift card was created but payment failed. Gift card ID:', giftCardResponse.data.id);
+                        // TODO: Consider implementing a way to void/cancel the gift card if payment fails
+                    }
+
+                    // Clear the card element to allow retrying
+                    if (stripeElements && stripeElements.card) {
+                        stripeElements.card.clear();
+                    }
+                } finally {
+                    setIsProcessingPayment(false);
+                }
+            };
+
+            const initializeStripe = (stripeKey, amount) => {
+                try {
+                    if (!selectedLocation || !selectedLocation.payment_account || !selectedLocation.payment_account.stripe_account_id) {
+                        throw new Error('This location is not configured for payments.');
+                    }
+                    if (!stripeKey) {
+                        throw new Error('Stripe key is required.');
+                    }
+                    if (!amount || amount <= 0) {
+                        throw new Error('Valid amount is required.');
+                    }
+
+                    const stripe = Stripe(stripeKey);
+                    const elements = stripe.elements();
+                    
+                    // Create card element with styling options
+                    const card = elements.create('card', {
+                        style: {
+                            base: {
+                                fontSize: '16px',
+                                color: '#32325d',
+                                '::placeholder': {
+                                    color: '#aab7c4'
+                                }
+                            },
+                            invalid: {
+                                color: '#fa755a',
+                                iconColor: '#fa755a'
+                            }
+                        }
+                    });
+                    card.mount('#card-element');
+
+                    // Handle validation errors
+                    card.on('change', (event) => {
+                        const displayError = document.getElementById('card-errors');
+                        if (event.error) {
+                            displayError.textContent = event.error.message;
+                        } else {
+                            displayError.textContent = '';
+                        }
+                    });
+
+                    setStripeElements({ stripe, elements, card });
+                } catch (error) {
+                    console.error('Stripe initialization error:', error);
+                    setError(error.message);
+                    if (stripeElements && stripeElements.card) {
+                        stripeElements.card.unmount();
+                    }
+                    setStripeElements(null);
+                }
+            };
+
+
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                
+                // Reset all state
+                setError('');
+                setCompanyData(null);
+                setLocations([]);
+                setSelectedLocation(null);
+                setGiftCardPurchase(null);
+                setGuestData(null);
+                setUserData(null);
+                
+                // Reset Stripe elements if they exist
+                if (stripeElements && stripeElements.card) {
+                    stripeElements.card.unmount();
+                    setStripeElements(null);
+                }
+
+                // Validate form data
+                if (!formData.baseUrl || !formData.companyId) {
+                    setError('Base URL and Company ID are required.');
+                    return;
+                }
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    console.log('Making API calls to:', baseUrlWithoutTrailingSlash);
+                    
+                    const [companyResponse, locationsResponse] = await Promise.all([
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}?include_external_locations=false&include_gc_templates=false&include_env_fees=false&include_parent_settings=false&include_scripts=false&include_subscription=false&include_custom_fields=true&include_intake_forms=true&blocked=true`),
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}/locations?include_business_hours=true&include_mobility=true`)
+                    ]);
+
+                    console.log('Company Response:', companyResponse.data);
+                    console.log('Locations Response:', locationsResponse.data);
+
+                    // Validate company data
+                    if (!companyResponse.data || !companyResponse.data.company) {
+                        throw new Error('Invalid company data received');
+                    }
+
+                    const company = companyResponse.data.company;
+                    
+                    // Validate company has Stripe integration
+                    if (!company.stripe_key) {
+                        throw new Error('This company is not configured for gift card payments');
+                    }
+                    
+                    setCompanyData(company);
+
+                    // Validate locations data
+                    if (!locationsResponse.data || !locationsResponse.data.locations || !Array.isArray(locationsResponse.data.locations)) {
+                        throw new Error('Invalid locations data received');
+                    }
+
+                    // Filter locations that support payments
+                    const locationsWithPayments = locationsResponse.data.locations.filter(location => 
+                        location.payment_account && 
+                        location.payment_account.stripe_account_id
+                    );
+                    
+                    if (locationsWithPayments.length === 0) {
+                        throw new Error('No locations are currently configured for gift card payments');
+                    }
+                    
+                    setLocations(locationsWithPayments);
+                    
+                    // If there's only one location, select it automatically
+                    if (locationsWithPayments.length === 1) {
+                        handleLocationSelect(locationsWithPayments[0]);
+                    }
+                } catch (err) {
+                    const errorMessage = err.response ? 
+                        'Error loading company data. Please check your Base URL and Company ID.' : 
+                        err.message;
+                    setError(errorMessage);
+                    console.error('API Error:', err);
+                }
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto">
+                    <form onSubmit={handleSubmit} className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="baseUrl">
+                                Base URL
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="baseUrl"
+                                type="text"
+                                value={formData.baseUrl}
+                                onChange={(e) => setFormData(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                placeholder="www.mytime.com"
+                            />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyId">
+                                Company ID
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="companyId"
+                                type="text"
+                                value={formData.companyId}
+                                onChange={(e) => setFormData(prev => ({ ...prev, companyId: e.target.value }))}
+                                placeholder="40426"
+                            />
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <button
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                type="submit">
+                                Submit
+                            </button>
+                        </div>
+                    </form>
+
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <span className="block sm:inline">{error}</span>
+                        </div>
+                    )}
+
+                    {companyData && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Company Information</h2>
+                            <p><span className="font-bold">ID:</span> {companyData.id}</p>
+                            <p><span className="font-bold">Name:</span> {companyData.name}</p>
+                        </div>
+                    )}
+
+                    {locations.length > 0 && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Locations</h2>
+                            <div className="space-y-4">
+                                {locations.map(location => (
+                                    <div key={location.id} className="border-b pb-4">
+                                        <p><span className="font-bold">ID:</span> {location.id}</p>
+                                        <p><span className="font-bold">Nickname:</span> {location.nickname}</p>
+                                        <p><span className="font-bold">Address:</span> {location.street_address}</p>
+                                        <p><span className="font-bold">City:</span> {location.city}</p>
+                                        <p><span className="font-bold">State:</span> {location.state}</p>
+                                        <p><span className="font-bold">Country:</span> {location.country}</p>
+                                        <button
+                                            onClick={() => handleLocationSelect(location)}
+                                            className={`mt-4 px-4 py-2 rounded font-bold ${selectedLocation && selectedLocation.id === location.id ? 'bg-green-500 text-white' : 'bg-blue-500 hover:bg-blue-700 text-white'}`}
+                                        >
+                                            {selectedLocation && selectedLocation.id === location.id ? 'Selected' : 'Select Location'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedLocation && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Purchase Gift Card</h2>
+                            <form onSubmit={handleGiftCardSubmit} className="space-y-4">
+                                <div className="grid grid-cols-1 gap-4">
+                                    <div>
+                                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="from">
+                                            From (Sender Name)
+                                        </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="from"
+                                        type="text"
+                                        value={giftCardForm.from}
+                                        onChange={(e) => setGiftCardForm(prev => ({ ...prev, from: e.target.value }))}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="to_first_name">
+                                        Recipient First Name
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="to_first_name"
+                                        type="text"
+                                        value={giftCardForm.to_first_name}
+                                        onChange={(e) => setGiftCardForm(prev => ({ ...prev, to_first_name: e.target.value }))}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="to_last_name">
+                                        Recipient Last Name
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="to_last_name"
+                                        type="text"
+                                        value={giftCardForm.to_last_name}
+                                        onChange={(e) => setGiftCardForm(prev => ({ ...prev, to_last_name: e.target.value }))}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="sender_email">
+                                        Sender Email
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="sender_email"
+                                        type="email"
+                                        value={giftCardForm.sender_email}
+                                        onChange={(e) => setGiftCardForm(prev => ({ ...prev, sender_email: e.target.value }))}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="recipient_email">
+                                        Recipient Email
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="recipient_email"
+                                        type="email"
+                                        value={giftCardForm.recipient_email}
+                                        onChange={(e) => setGiftCardForm(prev => ({ ...prev, recipient_email: e.target.value }))}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="amount">
+                                        Amount ($)
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="amount"
+                                        type="number"
+                                        min="1"
+                                        step="0.01"
+                                        value={giftCardForm.amount}
+                                        onChange={handleAmountChange}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="recipient_note">
+                                        Note (Optional)
+                                    </label>
+                                    <textarea
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="recipient_note"
+                                        value={giftCardForm.recipient_note}
+                                        onChange={(e) => setGiftCardForm(prev => ({ ...prev, recipient_note: e.target.value }))}
+                                        rows="3"
+                                    />
+                                </div>
+                                    <div className="mt-6">
+                                        <label className="block text-gray-700 text-sm font-bold mb-2">
+                                            Card Details
+                                        </label>
+                                        <div id="card-element" className="mb-2"></div>
+                                        <div id="card-errors" className="mt-2 text-red-600 text-sm" role="alert"></div>
+                                    </div>
+                                    {error && (
+                                        <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded relative">
+                                            <span className="block sm:inline">{error}</span>
+                                        </div>
+                                    )}
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between text-sm text-gray-600">
+                                            <span>Payment Status:</span>
+                                            <span className={`font-medium ${isProcessingPayment ? 'text-blue-600' : 'text-green-600'}`}>
+                                                {isProcessingPayment ? 'Processing...' : 'Ready'}
+                                            </span>
+                                        </div>
+                                        <button
+                                            type="submit"
+                                            disabled={isProcessingPayment}
+                                            className={`w-full bg-green-500 hover:bg-green-700 text-white font-bold py-3 px-4 rounded focus:outline-none focus:shadow-outline transition-all duration-150 ${
+                                                isProcessingPayment ? 'opacity-50 cursor-not-allowed' : ''
+                                            }`}
+                                        >
+                                            {isProcessingPayment ? (
+                                                <span className="flex items-center justify-center">
+                                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                    </svg>
+                                                    Processing Payment...
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center justify-center">
+                                                    <svg className="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                                                    </svg>
+                                                    Purchase Gift Card
+                                                </span>
+                                            )}
+                                        </button>
+                                        <p className="text-sm text-gray-600 text-center mt-2">
+                                            Your card will be charged ${giftCardForm.amount || '0.00'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    )}
+
+                    
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
