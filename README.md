@@ -31,6 +31,12 @@ Browse through the HTML examples in this repository to understand how to impleme
 
 2. `stripe_add_remove_credit_card/` - Shows how to integrate Stripe payment processing for managing credit cards in the booking process
 
+3. `gift_card_without_saving_credit_card/` - Demonstrates how to implement gift card purchases using Stripe payment elements without storing credit card information. Features include:
+   - One-time payment processing
+   - Stripe Payment Element integration
+   - Gift card purchase flow
+   - Email-based gift card delivery
+
 ## Implementation Notes
 
 - The examples use React and modern JavaScript features
