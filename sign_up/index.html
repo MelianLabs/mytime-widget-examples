@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Booking</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [formData, setFormData] = React.useState({
+                baseUrl: '',
+                companyId: ''
+            });
+            const [error, setError] = React.useState(null);
+            const [companyData, setCompanyData] = React.useState(null);
+
+            React.useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const baseUrl = params.get('base_url');
+                const companyId = params.get('company_id');
+                
+                if (baseUrl && companyId) {
+                    setFormData({
+                        baseUrl,
+                        companyId
+                    });
+                }
+            }, []);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                
+                // Reset all state
+                setError('');
+                setCompanyData(null);
+                
+
+
+                // Validate form data
+                if (!formData.baseUrl || !formData.companyId) {
+                    setError('Base URL and Company ID are required.');
+                    return;
+                }
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    console.log('Making API calls to:', baseUrlWithoutTrailingSlash);
+                    
+                    const [companyResponse] = await Promise.all([
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}?include_external_locations=false&include_gc_templates=false&include_env_fees=false&include_parent_settings=false&include_scripts=false&include_subscription=false&include_custom_fields=true&include_intake_forms=true&blocked=true`),
+                    ]);
+
+                    console.log('Company Response:', companyResponse.data);
+
+                    // Validate company data
+                    if (!companyResponse.data || !companyResponse.data.company) {
+                        throw new Error('Invalid company data received');
+                    }
+
+                    const company = companyResponse.data.company;
+                    
+                    // Validate company has Stripe integration
+                    if (!company.stripe_key) {
+                        throw new Error('This company is not configured for gift card payments');
+                    }
+                    
+                    setCompanyData(company);
+                } catch (err) {
+                    const errorMessage = err.response ? 
+                        'Error loading company data. Please check your Base URL and Company ID.' : 
+                        err.message;
+                    setError(errorMessage);
+                    console.error('API Error:', err);
+                }
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto">
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <span className="block sm:inline">{error}</span>
+                        </div>
+                    )}
+                    <form onSubmit={handleSubmit} className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                    <div className="mb-4">
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="baseUrl">
+                            Base URL
+                        </label>
+                        <input
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            id="baseUrl"
+                            type="text"
+                            value={formData.baseUrl}
+                            onChange={(e) => setFormData(prev => ({ ...prev, baseUrl: e.target.value }))}
+                            placeholder="www.mytime.com"
+                        />
+                    </div>
+                    <div className="mb-6">
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyId">
+                            Company ID
+                        </label>
+                        <input
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            id="companyId"
+                            type="text"
+                            value={formData.companyId}
+                            onChange={(e) => setFormData(prev => ({ ...prev, companyId: e.target.value }))}
+                            placeholder="40426"
+                        />
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <button
+                            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                            type="submit">
+                            Submit
+                        </button>
+                    </div>
+                </form>
+
+                {error && (
+                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                        <span className="block sm:inline">{error}</span>
+                    </div>
+                )}
+
+                {companyData && (
+                    <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                        <h2 className="text-xl font-bold mb-4">Company Information</h2>
+                        <p><span className="font-bold">ID:</span> {companyData.id}</p>
+                        <p><span className="font-bold">Name:</span> {companyData.name}</p>
+                    </div>
+                )}
+            </div>
+        );
+    }
+    
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+    </script>
+</body>
+</html>
