@@ -71,7 +71,7 @@
                         {
                             email: loginData.email,
                             password: loginData.password,
-                            company_id: parseInt(formData.companyId),
+                            company_id: parseInt(selectedLocation.company_id),
                             recaptcha_token: null
                         }
                     );
@@ -84,7 +84,7 @@
                     await axios.put(
                         `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/client`,
                         {
-                            company_id: parseInt(formData.companyId),
+                            company_id: parseInt(selectedLocation.company_id),
                             client: {
                                 preferred_language: 'en-US'
                             }
@@ -225,9 +225,9 @@
                 try {
                     const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
                     const [employeesResponse, servicesResponse, pricingsResponse] = await Promise.all([
-                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}/employees?location_ids=${location.id}`),
-                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}/deals?location_ids=${location.id}&variation_setting=true`),
-                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}/pricings?location_ids=${location.id}`)
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${location.company_id}/employees?location_ids=${location.id}`),
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${location.company_id}/deals?location_ids=${location.id}&variation_setting=true`),
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${location.company_id}/pricings?location_ids=${location.id}`)
                     ]);
 
                     console.log('Employees Response:', employeesResponse.data);
