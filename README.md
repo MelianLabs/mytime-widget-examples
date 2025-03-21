@@ -20,7 +20,7 @@ Browse through the HTML examples in this repository to understand how to impleme
 
 ## Available Examples
 
-1. `book_services_no_credit_card/` - A React-based example demonstrating a complete appointment booking flow without credit card requirements. Features include:
+1. `book_services/` - A React-based example demonstrating a complete appointment booking flow. Features include:
    - Company and location selection
    - Service and variation browsing
    - Real-time availability checking
@@ -36,6 +36,15 @@ Browse through the HTML examples in this repository to understand how to impleme
    - Stripe Payment Element integration
    - Gift card purchase flow
    - Email-based gift card delivery
+
+4. `sign_up/` - A React-based example demonstrating user registration flow. Features include:
+   - Form fields for user information (First Name, Last Name, Email, Password, ZIP)
+   - Pre-filled ZIP code (4310)
+   - Hidden fields for country (PH), welcome email, and marketplace settings
+   - Tailwind CSS styling with minimal custom CSS
+   - Comprehensive error handling with formatted display
+   - Success state showing user details (Name, Email, User ID, Country)
+   - URL parameter support for base_url and company_id
 
 ## Implementation Notes
 
