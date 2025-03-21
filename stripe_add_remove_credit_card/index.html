@@ -13,62 +13,12 @@
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <!-- Stripe.js -->
     <script src="https://js.stripe.com/v3/"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes spin { 
             0% { transform: rotate(0deg); } 
             100% { transform: rotate(360deg); } 
-        }
-        .login-form {
-            max-width: 400px;
-            margin: 2rem auto;
-            padding: 2rem;
-            border: 1px solid #e0e0e0;
-            border-radius: 12px;
-            background-color: #ffffff;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease-in-out;
-        }
-        .login-form:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-        }
-        .form-group {
-            margin-bottom: 1rem;
-        }
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-            color: #495057;
-            font-size: 0.95rem;
-        }
-        input {
-            width: 100%;
-            padding: 0.75rem;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-            outline: none;
-        }
-        input:focus {
-            border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
-        }
-        input::placeholder {
-            color: #adb5bd;
-        }
-        button {
-            width: 100%;
-            padding: 0.75rem;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #0056b3;
         }
     </style>
 </head>
@@ -78,16 +28,7 @@
     <script type="text/babel">
         const showNotification = (message, type = 'success') => {
             const notification = document.createElement('div');
-            notification.style.position = 'fixed';
-            notification.style.top = '20px';
-            notification.style.right = '20px';
-            notification.style.backgroundColor = type === 'success' ? '#28a745' : '#dc3545';
-            notification.style.color = 'white';
-            notification.style.padding = '1rem';
-            notification.style.borderRadius = '4px';
-            notification.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
-            notification.style.zIndex = '1000';
-            notification.style.transition = 'opacity 0.3s ease-in-out';
+            notification.className = `fixed top-5 right-5 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white p-4 rounded shadow-lg z-50 transition-opacity duration-300`;
             notification.textContent = message;
             document.body.appendChild(notification);
 
@@ -346,42 +287,18 @@
                 };
 
                 return (
-                    <form onSubmit={handleSubmit} style={{ maxWidth: '500px', margin: '2rem auto', position: 'relative' }}>
+                    <form onSubmit={handleSubmit} className="max-w-xl mx-auto my-8 relative">
 
                         {(initializing || loading) && (
-                            <div style={{
-                                textAlign: 'center',
-                                padding: '2rem',
-                                backgroundColor: '#f8f9fa',
-                                borderRadius: '4px',
-                                marginBottom: '1rem'
-                            }}>
-                                <div style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
+                            <div className="text-center p-8 bg-gray-50 rounded mb-4">
+                                <div className="text-gray-600 mb-2">
                                     {initializing ? 'Initializing payment form...' : 'Saving your card...'}
                                 </div>
-                                <div style={{ 
-                                    width: '40px',
-                                    height: '40px',
-                                    margin: '0 auto',
-                                    border: '3px solid #f3f3f3',
-                                    borderTop: '3px solid #007bff',
-                                    borderRadius: '50%',
-                                    animation: 'spin 1s linear infinite'
-                                }}></div>
+                                <div className="w-10 h-10 mx-auto border-3 border-gray-200 border-t-blue-500 rounded-full animate-spin"></div>
                             </div>
                         )}
-                        <div style={{ 
-                            padding: '1rem', 
-                            border: '1px solid #e0e0e0',
-                            borderRadius: '8px',
-                            marginBottom: '1rem',
-                            opacity: loading ? '0.5' : '1',
-                            pointerEvents: loading ? 'none' : 'auto',
-                            transition: 'opacity 0.2s ease-in-out',
-                            backgroundColor: '#ffffff',
-                            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
-                        }}>
-                            <div style={{ marginBottom: '1rem', color: '#424770', fontSize: '16px' }}>
+                        <div className={`p-4 border border-gray-200 rounded-lg mb-4 bg-white shadow-sm transition-opacity duration-200 ${loading ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+                            <div className="mb-4 text-gray-700 text-base">
                                 Enter your card details:
                             </div>
                             <div id="card-element"></div>
@@ -495,113 +412,36 @@
             };
 
             const UserProfile = ({ user }) => (
-                <div className="user-profile" style={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '12px',
-                    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-                    border: '1px solid #e0e0e0',
-                    animation: 'slideIn 0.4s ease-out'
-                }}>
-                <style>{'@keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }'}</style>
-                    <h2 style={{
-                        color: '#2d3748',
-                        borderBottom: '2px solid #e0e0e0',
-                        paddingBottom: '1rem',
-                        marginBottom: '2rem'
-                    }}>Welcome, {user.first_name} {user.last_name}</h2>
+                <div className="bg-white rounded-xl shadow-md border border-gray-200 transform transition-all duration-300 opacity-100 translate-y-0 motion-safe:animate-[fade-in-up_0.4s_ease-out]">
+                <style>{'@keyframes fade-in-up { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }'}</style>
+                    <h2 className="text-gray-800 border-b-2 border-gray-200 pb-4 mb-8">Welcome, {user.first_name} {user.last_name}</h2>
                     <div className="credit-cards">
-                        <h3 style={{
-                            color: '#4a5568',
-                            fontSize: '1.5rem',
-                            marginBottom: '1.5rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                        }}>
-                            <span style={{
-                                backgroundColor: '#ebf4ff',
-                                color: '#4299e1',
-                                padding: '0.5rem',
-                                borderRadius: '8px',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                width: '32px',
-                                height: '32px'
-                            }}>💳</span>
+                        <h3 className="text-gray-700 text-2xl mb-6 flex items-center gap-2">
+                            <span className="bg-blue-50 text-blue-500 p-2 rounded-lg inline-flex items-center justify-center w-8 h-8">💳</span>
                             Credit Cards
                         </h3>
                         {user.credit_cards.length > 0 ? (
-                            <ul style={{ 
-                                listStyle: 'none', 
-                                padding: 0,
-                                display: 'grid',
-                                gap: '1rem',
-                                animation: 'fadeIn 0.3s ease-in-out'
-                            }}>
+                            <ul className="list-none p-0 grid gap-4 animate-[fadeIn_0.3s_ease-in-out]">
                             <style>{'@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }'}</style>
                                 {user.credit_cards.map(card => (
-                                    <li key={card.id} style={{ 
-                                        padding: '1.25rem',
-                                        border: '1px solid #e0e0e0',
-                                        borderRadius: '8px',
-                                        marginBottom: '1rem',
-                                        position: 'relative',
-                                        backgroundColor: '#ffffff',
-                                        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                                        transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
-                                        ':hover': {
-                                            transform: 'translateY(-2px)',
-                                            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-                                        }
-                                    }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                            <span style={{ 
-                                                backgroundColor: '#f8f9fa',
-                                                padding: '0.25rem 0.5rem',
-                                                borderRadius: '4px',
-                                                marginRight: '0.5rem',
-                                                fontSize: '0.9rem',
-                                                color: '#495057',
-                                                fontWeight: 'bold'
-                                            }}>{card.brand}</span>
-                                            <span style={{ color: '#6c757d' }}>ending in {card.last4}</span>
+                                    <li key={card.id} className="p-5 border border-gray-200 rounded-lg mb-4 relative bg-white shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200">
+                                        <div className="grid grid-cols-[auto_auto_1fr] items-center gap-2 mb-2 pr-16">
+                                            <span className="bg-gray-50 px-2 py-1 rounded text-sm text-gray-600 whitespace-nowrap">ID: {card.id}</span>
+                                            <span className="bg-gray-50 px-2 py-1 rounded text-sm text-gray-700 font-bold whitespace-nowrap">{card.brand}</span>
+                                            <span className="text-gray-500 truncate">ending in {card.last4}</span>
                                         </div>
-                                        <div style={{ color: '#6c757d', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
+                                        <div className="text-gray-500 text-sm mb-1">
                                             Expires: {card.exp_month}/{card.exp_year}
                                         </div>
-                                        <div style={{ color: '#495057' }}>{card.name}</div>
+                                        <div className="text-gray-700">{card.name}</div>
                                         <button
                                             onClick={() => handleDeleteCard(card.id)}
                                             disabled={deleteLoading === card.id}
-                                            style={{
-                                                position: 'absolute',
-                                                top: '1rem',
-                                                right: '1rem',
-                                                backgroundColor: deleteLoading === card.id ? '#dc354580' : '#dc3545',
-                                                color: 'white',
-                                                border: 'none',
-                                                borderRadius: '4px',
-                                                padding: '0.5rem 0.75rem',
-                                                cursor: deleteLoading === card.id ? 'not-allowed' : 'pointer',
-                                                width: 'auto',
-                                                fontSize: '0.9rem',
-                                                transition: 'background-color 0.2s ease-in-out',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.5rem'
-                                            }}
+                                            className={`absolute top-4 right-4 bg-red-500 ${deleteLoading === card.id ? 'opacity-50' : 'hover:bg-red-600'} text-white rounded px-3 py-2 text-sm transition-colors duration-200 flex items-center gap-2 ${deleteLoading === card.id ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                                         >
                                             {deleteLoading === card.id ? (
                                                 <React.Fragment>
-                                                    <div style={{ 
-                                                        width: '14px',
-                                                        height: '14px',
-                                                        border: '2px solid #fff',
-                                                        borderTop: '2px solid transparent',
-                                                        borderRadius: '50%',
-                                                        animation: 'spin 1s linear infinite'
-                                                    }}></div>
+                                                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                                                     Deleting...
                                                 </React.Fragment>
                                             ) : (
@@ -612,74 +452,21 @@
                                 ))}
                             </ul>
                         ) : (
-                            <div style={{
-                                textAlign: 'center',
-                                padding: '2rem',
-                                backgroundColor: '#f8fafc',
-                                borderRadius: '12px',
-                                border: '2px dashed #e2e8f0'
-                            }}>
-                                <div style={{
-                                    width: '64px',
-                                    height: '64px',
-                                    backgroundColor: '#ebf4ff',
-                                    borderRadius: '50%',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    margin: '0 auto 1rem auto',
-                                    fontSize: '2rem'
-                                }}>💳</div>
-                                <p style={{
-                                    color: '#4a5568',
-                                    fontSize: '1.1rem',
-                                    marginBottom: '0.5rem'
-                                }}>No credit cards on file</p>
-                                <p style={{
-                                    color: '#718096',
-                                    fontSize: '0.95rem',
-                                    marginBottom: '1.5rem'
-                                }}>Add a credit card to get started</p>
+                            <div className="text-center p-8 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
+                                <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl">💳</div>
+                                <p className="text-gray-700 text-lg mb-2">No credit cards on file</p>
+                                <p className="text-gray-500 text-sm mb-6">Add a credit card to get started</p>
                                 {urlParams.amount && (
-                                    <p style={{
-                                        color: '#4a5568',
-                                        fontSize: '0.9rem',
-                                        marginBottom: '1rem',
-                                        backgroundColor: '#f7fafc',
-                                        padding: '0.5rem 1rem',
-                                        borderRadius: '6px',
-                                        display: 'inline-block'
-                                    }}>
+                                    <p className="text-gray-700 text-sm mb-4 bg-gray-50 px-4 py-2 rounded-lg inline-block">
                                         Amount to be charged: ${(parseInt(urlParams.amount) / 100).toFixed(2)}
                                     </p>
                                 )}
                                 {!addingCard ? (
                                     <button
                                         onClick={getStripeSecret}
-                                        style={{
-                                            backgroundColor: '#28a745',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            padding: '1rem 1.5rem',
-                                            cursor: 'pointer',
-                                            width: 'auto',
-                                            marginTop: '1.5rem',
-                                            fontSize: '1rem',
-                                            fontWeight: '500',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.5rem',
-                                            transition: 'all 0.2s ease-in-out',
-                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                                            ':hover': {
-                                                backgroundColor: '#218838',
-                                                transform: 'translateY(-1px)',
-                                                boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-                                            }
-                                        }}
+                                        className="mt-6 px-6 py-4 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium flex items-center gap-2 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200"
                                     >
-                                        <span style={{ fontSize: '1.25rem', marginRight: '0.5rem' }}>+</span>
+                                        <span className="text-xl mr-2">+</span>
                                         Add New Card
                                     </button>
                                 ) : (
@@ -791,56 +578,27 @@
             };
 
             return (
-                <div className="login-form" style={{ position: 'relative', maxWidth: '400px', margin: '2rem auto', padding: '2rem', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                    <h2 style={{ marginBottom: '1.5rem', color: '#2d3748', textAlign: 'center' }}>Login</h2>
+                <div className="relative max-w-md mx-auto my-8 p-8 bg-white rounded-lg shadow-md transition-transform duration-300 hover:-translate-y-1 hover:shadow-lg">
+                    <h2 className="mb-6 text-gray-800 text-center text-2xl font-bold">Login</h2>
                     {isLoggingIn && (
-                        <div style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            zIndex: 10,
-                            borderRadius: '8px'
-                        }}>
-                            <div style={{
-
-                                width: '40px',
-                                height: '40px',
-                                border: '3px solid #f3f3f3',
-                                borderTop: '3px solid #007bff',
-                                borderRadius: '50%',
-                                animation: 'spin 1s linear infinite',
-                                marginBottom: '1rem'
-                            }}></div>
-                            <div style={{ color: '#6c757d' }}>
+                        <div className="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10 rounded-lg">
+                            <div className="w-10 h-10 mb-4 border-3 border-gray-200 border-t-blue-500 rounded-full animate-spin"></div>
+                            <div className="text-gray-600">
                                 {isLoggingIn ? 'Logging in...' : 'Loading user data...'}
                             </div>
                         </div>
                     )}
                     {error && (
-                        <div style={{ 
-                            padding: '0.75rem',
-                            marginBottom: '1rem',
-                            backgroundColor: '#fff5f5',
-                            border: '1px solid #dc3545',
-                            borderRadius: '4px',
-                            color: '#dc3545',
-                            fontSize: '14px'
-                        }}>
+                        <div className="p-3 mb-4 bg-red-50 border border-red-500 rounded text-red-600 text-sm">
                             <strong>Error:</strong> {error}
                         </div>
                     )}
-                    <form onSubmit={handleSubmit}>
-                        <div className="form-group">
-                            <label htmlFor="domain">Domain:</label>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="mb-4">
+                            <label htmlFor="domain" className="block text-gray-700 text-sm font-medium mb-2">Domain:</label>
                             <input
                                 type="text"
+                                className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-colors duration-200"
                                 id="domain"
                                 name="domain"
                                 value={formData.domain}
@@ -849,53 +607,46 @@
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label htmlFor="company_id">Company ID:</label>
+                        <div className="mb-4">
+                            <label htmlFor="company_id" className="block text-gray-700 text-sm font-medium mb-2">Company ID:</label>
                             <input
                                 type="number"
                                 id="company_id"
                                 name="company_id"
                                 value={formData.company_id}
                                 onChange={handleChange}
+                                className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-colors duration-200"
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label htmlFor="email">Email:</label>
+                        <div className="mb-4">
+                            <label htmlFor="email" className="block text-gray-700 text-sm font-medium mb-2">Email:</label>
                             <input
                                 type="email"
                                 id="email"
                                 name="email"
                                 value={formData.email}
                                 onChange={handleChange}
+                                className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-colors duration-200"
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label htmlFor="password">Password:</label>
+                        <div className="mb-4">
+                            <label htmlFor="password" className="block text-gray-700 text-sm font-medium mb-2">Password:</label>
                             <input
                                 type="password"
                                 id="password"
                                 name="password"
                                 value={formData.password}
                                 onChange={handleChange}
+                                className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-colors duration-200"
                                 required
                             />
                         </div>
                         <button 
                             type="submit" 
                             disabled={isLoggingIn}
-                            style={{ 
-                                backgroundColor: isLoggingIn ? '#ccc' : '#007bff',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                padding: '0.75rem',
-                                width: '100%',
-                                cursor: isLoggingIn ? 'not-allowed' : 'pointer',
-                                opacity: isLoggingIn ? 0.7 : 1,
-                                transition: 'opacity 0.2s ease-in-out, background-color 0.2s ease-in-out'
-                            }}
+                            className={`w-full p-3 rounded text-white transition-all duration-200 ${isLoggingIn ? 'bg-gray-400 opacity-70 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600 cursor-pointer'}`}
                         >
                             {isLoggingIn ? 'Logging in...' : 'Login'}
                         </button>
