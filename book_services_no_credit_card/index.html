@@ -34,7 +34,7 @@
             const [availableTimes, setAvailableTimes] = React.useState([]);
             const [selectedTime, setSelectedTime] = React.useState(null);
             const [cartData, setCartData] = React.useState(null);
-            const [loginData, setLoginData] = React.useState({ email: '', password: '' });
+            const [loginData, setLoginData] = React.useState({ email: '', password: '', cardId: '' });
             const [userData, setUserData] = React.useState(null);
             const [purchaseData, setPurchaseData] = React.useState(null);
             const [error, setError] = React.useState('');
@@ -111,16 +111,22 @@
                     setCartData(cartUpdateResponse.data.cart);
 
                     // Create purchase
+                    const purchasePayload = {
+                        note: '',
+                        referrer: 'express_checkout',
+                        cart_id: cartData.id,
+                        is_embedded: true,
+                        no_pay: true,
+                        is_mobile_consumer_app: false
+                    };
+
+                    if (loginData.cardId) {
+                        purchasePayload.card_id = loginData.cardId;
+                    }
+
                     const purchaseResponse = await axios.post(
                         `${baseUrlWithoutTrailingSlash}/api/mkp/v1/purchases`,
-                        {
-                            note: '',
-                            referrer: 'express_checkout',
-                            cart_id: cartData.id,
-                            is_embedded: true,
-                            no_pay: true,
-                            is_mobile_consumer_app: false
-                        },
+                        purchasePayload,
                         {
                             headers: {
                                 'Authorization': user.authentication_token
@@ -473,6 +479,15 @@
                                                                                     onChange={(e) => setLoginData(prev => ({ ...prev, password: e.target.value }))}
                                                                                     className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                                                                                     required
+                                                                                />
+                                                                            </div>
+                                                                            <div>
+                                                                                <label className="block text-sm font-medium text-gray-700 mb-1">Card ID (Optional)</label>
+                                                                                <input
+                                                                                    type="text"
+                                                                                    value={loginData.cardId}
+                                                                                    onChange={(e) => setLoginData(prev => ({ ...prev, cardId: e.target.value }))}
+                                                                                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                                                                                 />
                                                                             </div>
                                                                             <button
