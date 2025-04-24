@@ -46,6 +46,15 @@ Browse through the HTML examples in this repository to understand how to impleme
    - Success state showing user details (Name, Email, User ID, Country)
    - URL parameter support for base_url and company_id
 
+5. `client_lead_creation/` - A React-based example for creating clients or leads through the API. Features include:
+   - Form fields for Base URL, Company ID, Partner API Key, First Name, Last Name, Email
+   - Client type selection (Client or Lead) with dropdown menu
+   - URL parameter support for pre-filling form fields (base_url, company_id, partner_api_key)
+   - Tailwind CSS styling with minimal custom CSS
+   - Formatted error message display with improved readability
+   - Organized success response showing client/lead details
+   - Live-updating curl command example
+
 ## Implementation Notes
 
 - The examples use React and modern JavaScript features
