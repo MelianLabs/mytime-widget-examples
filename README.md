@@ -55,6 +55,17 @@ Browse through the HTML examples in this repository to understand how to impleme
    - Organized success response showing client/lead details
    - Live-updating curl command example
 
+6. `book_services_guest/` - A React-based example demonstrating appointment booking as a guest user. Features include:
+   - Company and location selection
+   - Employee selection
+   - Service and variation browsing
+   - Real-time availability checking based on selected employee
+   - Date and time slot selection
+   - Cart management
+   - Guest authentication using email only (no password required)
+   - Uses Gauthorization token instead of traditional login
+   - Booking confirmation
+
 ## Implementation Notes
 
 - The examples use React and modern JavaScript features
