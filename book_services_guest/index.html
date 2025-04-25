@@ -29,6 +29,7 @@
             const [services, setServices] = React.useState([]);
             const [pricings, setPricings] = React.useState([]);
             const [selectedVariation, setSelectedVariation] = React.useState(null);
+            const [selectedEmployee, setSelectedEmployee] = React.useState(null);
             const [availableDates, setAvailableDates] = React.useState([]);
             const [selectedDate, setSelectedDate] = React.useState(null);
             const [availableTimes, setAvailableTimes] = React.useState([]);
@@ -163,12 +164,12 @@
                             location_id: selectedLocation.id,
                             variation_ids: selectedVariation.id.toString(),
                             deal_id: time.deal_id,
-                            employee_ids: '',
+                            employee_ids: selectedEmployee ? selectedEmployee.id.toString() : '',
                             begin_at: time.begin_at,
                             end_at: time.end_at,
                             is_existing_customer: false,
                             travel_to_customer: false,
-                            has_specific_employee: false,
+                            has_specific_employee: selectedEmployee ? true : false,
                             child_id: ''
                         }
                     );
@@ -188,8 +189,9 @@
 
                 try {
                     const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const employeeIds = selectedEmployee ? selectedEmployee.id : '';
                     const response = await axios.get(
-                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/open_times?date=${date}&location_id=${selectedLocation.id}&employee_ids=&variation_ids=${selectedVariation.id}&is_existing_customer=false&include_tax=false&include_fulfillments=false&child_id=`
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/open_times?date=${date}&location_id=${selectedLocation.id}&employee_ids=${employeeIds}&variation_ids=${selectedVariation.id}&is_existing_customer=false&include_tax=false&include_fulfillments=false&child_id=`
                     );
 
                     console.log('Available Times Response:', response.data);
@@ -200,6 +202,14 @@
                 }
             };
 
+            const handleEmployeeSelect = (employee) => {
+                setSelectedEmployee(employee);
+                // If a variation is already selected, refresh available dates with the new employee
+                if (selectedVariation) {
+                    handleVariationSelect(selectedVariation);
+                }
+            };
+
             const handleVariationSelect = async (variation) => {
                 setSelectedVariation(variation);
                 setAvailableDates([]);
@@ -207,8 +217,9 @@
 
                 try {
                     const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const employeeIds = selectedEmployee ? selectedEmployee.id : '';
                     const response = await axios.get(
-                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/open_dates?location_id=${selectedLocation.id}&employee_ids=&variation_ids=${variation.id}&is_existing_customer=false&child_id=new`
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/open_dates?location_id=${selectedLocation.id}&employee_ids=${employeeIds}&variation_ids=${variation.id}&is_existing_customer=false&child_id=new`
                     );
 
                     console.log('Available Dates Response:', response.data);
@@ -224,6 +235,7 @@
                 setEmployees([]);
                 setServices([]);
                 setPricings([]);
+                setSelectedEmployee(null);
                 setError('');
 
                 try {
@@ -362,12 +374,19 @@
 
                     {selectedLocation && employees.length > 0 && (
                         <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
-                            <h2 className="text-xl font-bold mb-4">Employees</h2>
+                            <h2 className="text-xl font-bold mb-4">Select an Employee</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {employees.map(employee => (
-                                    <div key={employee.id} className="border p-4 rounded">
-                                        <p><span className="font-bold">ID:</span> {employee.id}</p>
+                                    <div 
+                                        key={employee.id} 
+                                        className={`border p-4 rounded cursor-pointer transition-colors ${selectedEmployee && selectedEmployee.id === employee.id ? 'bg-blue-100 border-blue-500' : 'hover:bg-gray-50'}`}
+                                        onClick={() => handleEmployeeSelect(employee)}
+                                    >
                                         <p><span className="font-bold">Name:</span> {employee.name} {employee.last_name}</p>
+                                        <p className="text-sm text-gray-600">{employee.id}</p>
+                                        {selectedEmployee && selectedEmployee.id === employee.id && (
+                                            <div className="mt-2 text-blue-600 text-sm font-semibold">Selected</div>
+                                        )}
                                     </div>
                                 ))}
                             </div>
