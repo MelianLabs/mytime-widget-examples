@@ -66,6 +66,17 @@ Browse through the HTML examples in this repository to understand how to impleme
    - Uses Gauthorization token instead of traditional login
    - Booking confirmation
 
+7. `cloud9_credit_cards/` - A React-based example demonstrating integration with Cloud9 payment gateway for adding and removing credit cards. Features include:
+   - User authentication with email and password
+   - Cloud9 iframe integration for secure credit card entry
+   - Adding credit cards to user accounts
+   - Viewing existing credit cards with details (brand, last 4 digits, expiration)
+   - Removing credit cards from user accounts
+   - URL parameter support for pre-filling form fields (base_url, company_id, partner_api_key, email, password)
+   - Tailwind CSS styling with minimal custom CSS
+   - Comprehensive error handling with formatted display
+   - Live-updating curl command examples for API calls
+
 ## Implementation Notes
 
 - The examples use React and modern JavaScript features
