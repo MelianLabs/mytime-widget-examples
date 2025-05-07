@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Credit Card with Cloud9</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [formData, setFormData] = React.useState({
+                baseUrl: '',
+                companyId: '',
+                email: '',
+                password: '',
+                partnerApiKey: ''
+            });
+            const [authToken, setAuthToken] = React.useState('');
+            const [userData, setUserData] = React.useState(null);
+            const [companyData, setCompanyData] = React.useState(null);
+            const [error, setError] = React.useState(null);
+            const [success, setSuccess] = React.useState(null);
+            const [loading, setLoading] = React.useState(false);
+            const [webseedData, setWebseedData] = React.useState(null);
+            const [creditCards, setCreditCards] = React.useState([]);
+            const [curlCommand, setCurlCommand] = React.useState('');
+            const iframeRef = React.useRef(null);
+
+            // Ensure baseUrl is properly formatted with http/https
+            const formatBaseUrl = (url) => {
+                if (!url) return '';
+                
+                // If it's already http or https, return as is
+                if (url.startsWith('http://') || url.startsWith('https://')) {
+                    return url;
+                }
+                
+                // If it's a file:// URL or other invalid format, convert to http
+                if (url.startsWith('file://') || url.startsWith('wsl.localhost')) {
+                    // Extract hostname part
+                    const parts = url.split('/');
+                    const hostname = parts.length > 2 ? parts[2] : 'localhost';
+                    return `http://${hostname}`;
+                }
+                
+                // Otherwise, prepend http://
+                return `http://${url}`;
+            };
+            
+            React.useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const baseUrl = params.get('base_url');
+                const companyId = params.get('company_id');
+                const partnerApiKey = params.get('partner_api_key');
+                const email = params.get('email');
+                const password = params.get('password');
+                
+                if (baseUrl || companyId || partnerApiKey || email || password) {
+                    setFormData(prev => ({
+                        ...prev,
+                        baseUrl: formatBaseUrl(baseUrl) || prev.baseUrl,
+                        companyId: companyId || prev.companyId,
+                        partnerApiKey: partnerApiKey || prev.partnerApiKey,
+                        email: email || prev.email,
+                        password: password || prev.password
+                    }));
+                    
+                    // If all required fields are present, auto-login
+                    if (baseUrl && companyId && email && password) {
+                        console.log('Auto-login with URL parameters');
+                        // We'll trigger login in the next render cycle
+                        setTimeout(() => {
+                            document.querySelector('button[type="submit"]').click();
+                        }, 500);
+                    }
+                }
+            }, []);
+
+            React.useEffect(() => {
+                // Listen for messages from the iframe
+                window.addEventListener('message', handleIframeMessageEvent);
+                return () => {
+                    window.removeEventListener('message', handleIframeMessageEvent);
+                };
+            }, []);
+
+            // Store important values on window for access in the iframe message handler
+            React.useEffect(() => {
+                // Create a namespace to avoid conflicts
+                window.cloud9CreditCardApp = {
+                    getBaseUrl: () => formatBaseUrl(formData.baseUrl),
+                    getCompanyId: () => formData.companyId,
+                    getAuthToken: () => authToken
+                };
+                
+                return () => {
+                    // Clean up when component unmounts
+                    delete window.cloud9CreditCardApp;
+                };
+            }, [formData.baseUrl, formData.companyId, authToken]);
+            
+            const handleIframeMessageEvent = (event) => {
+                const returnData = event.data;
+
+                if (!returnData.Status && !returnData.ResponseText) {
+                    return null;
+                }
+
+                if (returnData.Status === 'success') {
+                    const creditCardParams = parseCloud9SuccessResponse({
+                        response: returnData,
+                        companyId: window.cloud9CreditCardApp.getCompanyId()
+                    });
+
+                    submitCreditCardHandler(creditCardParams);
+                } else {
+                    setError(`Error from Cloud9: ${returnData.ResponseText || 'Unknown error'}`);
+                    setLoading(false);
+                }
+            };
+
+            const parseCloud9SuccessResponse = ({ response, companyId }) => {
+                const parsedData = {
+                    company_id: companyId,
+                    location_id: null,
+                    stripe_credit_card_token: response.CardToken,
+                    token_data: {
+                        funding: (response.Medium || '').toLowerCase(),
+                        brand: response.Brand,
+                        last4: (response.AccountNum || '').slice(-4),
+                        expDate: response.ExpDate,
+                        month: (response.ExpDate || '').substring(0, 2),
+                        year: '20' + (response.ExpDate || '').substring(2),
+                    },
+                    token2: response.CardToken,
+                    address_country: 'US', // Cloud9 forms are only for US clients
+                    add_to_client: true,
+                };
+
+                return parsedData;
+            };
+
+            const submitCreditCardHandler = async (creditCardParams) => {
+                try {
+                    setLoading(true);
+                    
+                    // Get values from window object to ensure they're available in the iframe context
+                    const baseUrl = window.cloud9CreditCardApp.getBaseUrl();
+                    const authToken = window.cloud9CreditCardApp.getAuthToken();
+                    
+                    // Generate curl command for reference
+                    const curlCmd = `curl '${baseUrl}/api/mkp/v1/user/credit_cards' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: ${authToken}' \
+  --data-raw '${JSON.stringify(creditCardParams)}'`;
+                    
+                    setCurlCommand(curlCmd);
+
+                    const response = await axios.post(
+                        `${baseUrl}/api/mkp/v1/user/credit_cards`,
+                        creditCardParams,
+                        {
+                            headers: {
+                                'Accept': 'application/json',
+                                'Authorization': authToken
+                            }
+                        }
+                    );
+
+                    if (response.status === 201 || response.status === 200) {
+                        setSuccess('Credit card added successfully!');
+                        // Refresh user data to show the new card
+                        fetchUserData();
+                    } else {
+                        throw new Error('Unexpected response status: ' + response.status);
+                    }
+                } catch (err) {
+                    let errorMessage = 'Failed to add credit card';
+                    if (err.response && err.response.data) {
+                        errorMessage = JSON.stringify(err.response.data, null, 2);
+                    } else if (err.message) {
+                        errorMessage = err.message;
+                    }
+                    setError(errorMessage);
+                    console.error('API Error:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const fetchUserData = async () => {
+                try {
+                    // Get values from window object to ensure they're available in all contexts
+                    const baseUrl = window.cloud9CreditCardApp.getBaseUrl();
+                    const companyId = window.cloud9CreditCardApp.getCompanyId();
+                    const authToken = window.cloud9CreditCardApp.getAuthToken();
+                    
+                    const response = await axios.get(
+                        `${baseUrl}/api/mkp/v1/user?company_id=${companyId}`,
+                        {
+                            headers: {
+                                'Accept': 'application/json',
+                                'Authorization': authToken
+                            }
+                        }
+                    );
+
+                    if (response.status === 200 && response.data && response.data.user) {
+                        setUserData(response.data.user);
+                        setCreditCards(response.data.user.credit_cards || []);
+                    }
+                } catch (err) {
+                    console.error('Error fetching user data:', err);
+                }
+            };
+            
+            const handleDeleteCard = async (cardId) => {
+                try {
+                    setLoading(true);
+                    setError(null);
+                    
+                    // Get values from window object
+                    const baseUrl = window.cloud9CreditCardApp.getBaseUrl();
+                    const companyId = window.cloud9CreditCardApp.getCompanyId();
+                    const authToken = window.cloud9CreditCardApp.getAuthToken();
+                    
+                    // Generate curl command for reference
+                    const curlCmd = `curl '${baseUrl}/api/mkp/v1/user/payment_methods/${cardId}?company_id=${companyId}&payment_type=card&_method=delete' \
+  -X 'DELETE' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: ${authToken}' \
+  -H 'Content-Type: application/json'`;
+                    
+                    setCurlCommand(curlCmd);
+                    
+                    const response = await axios.delete(
+                        `${baseUrl}/api/mkp/v1/user/payment_methods/${cardId}?company_id=${companyId}&payment_type=card`,
+                        {
+                            headers: {
+                                'Accept': 'application/json',
+                                'Authorization': authToken,
+                                'Content-Type': 'application/json'
+                            }
+                        }
+                    );
+                    
+                    if (response.status === 200 || response.status === 204) {
+                        // Find the card without using optional chaining
+                        const card = creditCards.find(card => card.id === cardId);
+                        const last4 = card && card.last4 ? card.last4 : 'xxxx';
+                        setSuccess(`Card ending in ${last4} was successfully removed`);
+                        // Refresh user data to update the cards list
+                        fetchUserData();
+                    } else {
+                        throw new Error('Unexpected response status: ' + response.status);
+                    }
+                } catch (err) {
+                    let errorMessage = 'Failed to remove credit card';
+                    if (err.response && err.response.data) {
+                        errorMessage = JSON.stringify(err.response.data, null, 2);
+                    } else if (err.message) {
+                        errorMessage = err.message;
+                    }
+                    setError(errorMessage);
+                    console.error('API Error:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setError(null);
+                setSuccess(null);
+                setLoading(true);
+                setAuthToken('');
+                setUserData(null);
+                setCompanyData(null);
+                setWebseedData(null);
+                setCreditCards([]);
+
+                // Validate form data
+                if (!formData.baseUrl || !formData.companyId || !formData.email || !formData.password) {
+                    setError('All fields are required.');
+                    setLoading(false);
+                    return;
+                }
+
+                try {
+                    const baseUrl = formatBaseUrl(formData.baseUrl);
+                    
+                    // Login to get authentication token
+                    const loginResponse = await axios.post(
+                        `${baseUrl}/api/mkp/v1/sessions`,
+                        {
+                            email: formData.email,
+                            password: formData.password,
+                            company_id: parseInt(formData.companyId),
+                            recaptcha_token: null
+                        },
+                        {
+                            headers: {
+                                'Accept': 'application/json'
+                            }
+                        }
+                    );
+
+                    if (loginResponse.data && loginResponse.data.user && loginResponse.data.user.authentication_token) {
+                        const token = loginResponse.data.user.authentication_token;
+                        setAuthToken(token);
+                        setUserData(loginResponse.data.user);
+                        setCreditCards(loginResponse.data.user.credit_cards || []);
+                        setSuccess('Login successful!');
+                        
+                        // Fetch company data
+                        const companyResponse = await axios.get(
+                            `${baseUrl}/api/mkp/v1/companies/${formData.companyId}?include_external_locations=false&include_gc_templates=true&include_env_fees=true&include_parent_settings=false&include_scripts=true&include_subscription=true&include_custom_fields=false&include_intake_forms=false&include_consumer_app=false`,
+                            {
+                                headers: {
+                                    'Accept': 'application/json',
+                                    'Authorization': token
+                                }
+                            }
+                        );
+
+                        if (companyResponse.data && companyResponse.data.company) {
+                            setCompanyData(companyResponse.data.company);
+                            
+                            // Get webseed for Cloud9 iframe
+                            if (formData.partnerApiKey) {
+                                const stripeAccountId = companyResponse.data.company.payment_account.id;
+                                if (stripeAccountId) {
+                                    const webseedResponse = await axios.post(
+                                        `${baseUrl}/stripe_accounts/${stripeAccountId}/webseed?key=${formData.partnerApiKey}`
+                                    );
+                                    
+                                    if (webseedResponse.data) {
+                                        setWebseedData(webseedResponse.data);
+                                    }
+                                } else {
+                                    setError('Company does not have a Stripe account configured');
+                                }
+                            } else {
+                                setError('Partner API Key is required to get webseed data');
+                            }
+                        }
+                    } else {
+                        throw new Error('Invalid login response');
+                    }
+                } catch (err) {
+                    let errorMessage = 'Login failed';
+                    if (err.response && err.response.data) {
+                        errorMessage = JSON.stringify(err.response.data, null, 2);
+                    } else if (err.message) {
+                        errorMessage = err.message;
+                    }
+                    setError(errorMessage);
+                    console.error('API Error:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const getIframeUrl = () => {
+                if (!webseedData) return '';
+                
+                const stylingTemplate = "MyTime_SaveCard";
+                const vtermURL = "https://testvterm.c9pg.com/CreateCardToken";
+                
+                return `${vtermURL}?Template=${stylingTemplate}&WebGMID=${webseedData.merchant_id}&SeedTime=${webseedData.timestamp}&Seed=${webseedData.seed}&GTID=${webseedData.terminal_id}&KeyIndex=${webseedData.key_index}&CallbackVersion=2.0`;
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto">
+                    <h1 className="text-2xl font-bold mb-4 text-center">Add Credit Card with Cloud9</h1>
+                    
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <pre className="whitespace-pre-wrap font-sans text-sm">{error}</pre>
+                        </div>
+                    )}
+                    
+                    {success && (
+                        <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <p className="font-bold">{success}</p>
+                        </div>
+                    )}
+                    
+                    <form onSubmit={handleLogin} className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="baseUrl">
+                                Base URL
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="baseUrl"
+                                type="text"
+                                value={formData.baseUrl}
+                                onChange={(e) => setFormData(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                placeholder="http://localhost:3000"
+                            />
+                        </div>
+                        
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyId">
+                                Company ID
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="companyId"
+                                type="text"
+                                value={formData.companyId}
+                                onChange={(e) => setFormData(prev => ({ ...prev, companyId: e.target.value }))}
+                                placeholder="696"
+                            />
+                        </div>
+                        
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="partnerApiKey">
+                                Partner API Key
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="partnerApiKey"
+                                type="text"
+                                value={formData.partnerApiKey}
+                                onChange={(e) => setFormData(prev => ({ ...prev, partnerApiKey: e.target.value }))}
+                                placeholder="ABCABCABCABC"
+                            />
+                        </div>
+                        
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
+                                Email
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="email"
+                                type="email"
+                                value={formData.email}
+                                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                                placeholder="emanuel+test-client@mytime.com"
+                            />
+                        </div>
+                        
+                        <div className="mb-6">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
+                                Password
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="password"
+                                type="password"
+                                value={formData.password}
+                                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                                placeholder="password"
+                            />
+                        </div>
+                        
+                        <div className="flex items-center justify-between">
+                            <button
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                type="submit"
+                                disabled={loading}
+                            >
+                                {loading ? 'Processing...' : 'Login'}
+                            </button>
+                        </div>
+                    </form>
+                    
+                    {authToken && webseedData && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Add Credit Card</h2>
+                            <p className="mb-4">Use the form below to add a new credit card to your account:</p>
+                            
+                            <div className="border border-gray-300 rounded p-2 mb-4">
+                                <iframe 
+                                    ref={iframeRef}
+                                    src={getIframeUrl()} 
+                                    width="100%" 
+                                    height="320px"
+                                    className="border-0"
+                                ></iframe>
+                            </div>
+                            
+                            {curlCommand && (
+                                <div className="mt-4">
+                                    <h3 className="text-lg font-bold mb-2">API Request Example:</h3>
+                                    <pre className="bg-gray-100 p-4 rounded overflow-x-auto text-xs">{curlCommand}</pre>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    
+                    {creditCards.length > 0 && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Your Credit Cards</h2>
+                            <div className="grid grid-cols-1 gap-4">
+                                {creditCards.map((card, index) => (
+                                    <div key={index} className="border border-gray-300 rounded p-4">
+                                        <div className="flex justify-between items-center">
+                                            <div>
+                                                <p className="font-bold">{card.brand}</p>
+                                                <p>•••• •••• •••• {card.last4}</p>
+                                                <p>Expires: {card.exp_month}/{card.exp_year}</p>
+                                            </div>
+                                            <div className="flex flex-col items-end space-y-2">
+                                                <span className="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                                                    ID: {card.id}
+                                                </span>
+                                                <button 
+                                                    onClick={() => handleDeleteCard(card.id)}
+                                                    disabled={loading}
+                                                    className="bg-red-500 hover:bg-red-700 text-white text-xs font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline"
+                                                >
+                                                    {loading ? 'Processing...' : 'Remove Card'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    
+                    {userData && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">User Information</h2>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p><span className="font-bold">ID:</span> {userData.id}</p>
+                                    <p><span className="font-bold">Name:</span> {userData.first_name} {userData.last_name}</p>
+                                    <p><span className="font-bold">Email:</span> {userData.email}</p>
+                                </div>
+                                <div>
+                                    <p><span className="font-bold">Client ID:</span> {userData.client && userData.client.id}</p>
+                                    <p><span className="font-bold">Client Type:</span> {userData.client && userData.client.type}</p>
+                                    <p><span className="font-bold">Auth Token:</span> {authToken}</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
