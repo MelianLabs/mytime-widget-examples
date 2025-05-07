@@ -76,6 +76,8 @@ Browse through the HTML examples in this repository to understand how to impleme
    - Tailwind CSS styling with minimal custom CSS
    - Comprehensive error handling with formatted display
    - Live-updating curl command examples for API calls
+   
+   **IMPORTANT SECURITY NOTE:** Please do not store the partner API key required for the webseed API call in your frontend code, as this poses a serious security risk. You'll need to implement a backend service that handles the API calls to webseed using the partner API key securely stored on your backend, and then pass the necessary data to your frontend.
 
 ## Implementation Notes
 
