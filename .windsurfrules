@@ -5,3 +5,5 @@ use axios for api calls
 use stripe.js for payment processing
 use payment elements from stripe
 create as little custom css as possible
+use proper error handling with user-friendly messages
+support URL parameters for pre-filling form fields

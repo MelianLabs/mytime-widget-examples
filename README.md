@@ -1,6 +1,6 @@
 # MyTime Widget Examples
 
-This repository contains HTML example files demonstrating how to integrate with the [MyTime Public API](https://www.mytime.com/api/mkp/v1/docs). The API enables businesses and developers to implement appointment booking functionality directly into their websites or applications using MyTime.com's scheduling platform.
+This repository contains example applications demonstrating how to integrate with the [MyTime Public API](https://www.mytime.com/api/mkp/v1/docs). The API enables businesses and developers to implement appointment booking functionality directly into their websites or applications using MyTime.com's scheduling platform.
 
 ## Purpose
 
@@ -8,96 +8,73 @@ These examples showcase how to use the MyTime Public API to:
 - Allow customers to book appointments on MyTime.com
 - Integrate MyTime's scheduling capabilities into your own website
 - Access MyTime's marketplace functionality
+- Process payments and manage credit cards
+- Create users, clients, and leads
+- Purchase and manage gift cards
 
 ## API Documentation
 
 For detailed API documentation and endpoints, visit:
 https://www.mytime.com/api/mkp/v1/docs
 
-## Getting Started
+## Common Technologies
 
-Browse through the HTML examples in this repository to understand how to implement various booking scenarios and API integrations. Each example includes comments and demonstrates best practices for using the MyTime Public API.
+All examples in this repository use:
+- **React**: For building the user interface
+- **Axios**: For making API calls to MyTime's Public API
+- **Tailwind CSS**: For styling with minimal custom CSS
+- **Modern JavaScript**: ES6+ features with Babel for compatibility
 
 ## Available Examples
 
-1. `book_services/` - A React-based example demonstrating a complete appointment booking flow. Features include:
-   - Company and location selection
-   - Service and variation browsing
-   - Real-time availability checking
-   - Date and time slot selection
-   - Cart management
-   - User authentication
-   - Booking confirmation
+Each example includes its own detailed README.md with step-by-step instructions on how to build a similar application.
 
-2. `stripe_add_remove_credit_card/` - Shows how to integrate Stripe payment processing for managing credit cards in the booking process
+1. [**Book Services**](./book_services/README.md) - A complete appointment booking flow with user authentication
+   - Demonstrates the standard booking workflow from location selection to confirmation
 
-3. `gift_card_without_saving_credit_card/` - Demonstrates how to implement gift card purchases using Stripe payment elements without storing credit card information. Features include:
+2. [**Book Services Guest**](./book_services_guest/README.md) - Appointment booking as a guest user
+   - Similar to the standard booking flow but uses guest authentication
+   - Optional employee selection
+
+3. [**Client/Lead Creation**](./client_lead_creation/README.md) - Create clients or leads through the API
+   - Client type selection (Client or Lead)
+   - Comprehensive error handling
+
+4. [**Sign Up**](./sign_up/README.md) - User registration flow
+   - Form fields for user information
+   - Success state showing user details
+
+5. [**Stripe Add/Remove Credit Card**](./stripe_add_remove_credit_card/README.md) - Manage credit cards with Stripe
+   - Secure credit card entry with Stripe Elements
+   - View and delete existing cards
+
+6. [**Gift Card Without Saving Credit Card**](./gift_card_without_saving_credit_card/README.md) - Gift card purchases with Stripe
    - One-time payment processing
-   - Stripe Payment Element integration
-   - Gift card purchase flow
    - Email-based gift card delivery
 
-4. `sign_up/` - A React-based example demonstrating user registration flow. Features include:
-   - Form fields for user information (First Name, Last Name, Email, Password, ZIP)
-   - Pre-filled ZIP code (4310)
-   - Hidden fields for country (PH), welcome email, and marketplace settings
-   - Tailwind CSS styling with minimal custom CSS
-   - Comprehensive error handling with formatted display
-   - Success state showing user details (Name, Email, User ID, Country)
-   - URL parameter support for base_url and company_id
-
-5. `client_lead_creation/` - A React-based example for creating clients or leads through the API. Features include:
-   - Form fields for Base URL, Company ID, Partner API Key, First Name, Last Name, Email
-   - Client type selection (Client or Lead) with dropdown menu
-   - URL parameter support for pre-filling form fields (base_url, company_id, partner_api_key)
-   - Tailwind CSS styling with minimal custom CSS
-   - Formatted error message display with improved readability
-   - Organized success response showing client/lead details
-   - Live-updating curl command example
-
-6. `book_services_guest/` - A React-based example demonstrating appointment booking as a guest user. Features include:
-   - Company and location selection
-   - Employee selection
-   - Service and variation browsing
-   - Real-time availability checking based on selected employee
-   - Date and time slot selection
-   - Cart management
-   - Guest authentication using email only (no password required)
-   - Uses Gauthorization token instead of traditional login
-   - Booking confirmation
-
-7. `cloud9_credit_cards/` - A React-based example demonstrating integration with Cloud9 payment gateway for adding and removing credit cards. Features include:
-   - User authentication with email and password
+7. [**Cloud9 Credit Cards**](./cloud9_credit_cards/README.md) - Credit card management with Cloud9
    - Cloud9 iframe integration for secure credit card entry
-   - Adding credit cards to user accounts
-   - Viewing existing credit cards with details (brand, last 4 digits, expiration)
-   - Removing credit cards from user accounts
-   - URL parameter support for pre-filling form fields (base_url, company_id, partner_api_key, email, password)
-   - Tailwind CSS styling with minimal custom CSS
-   - Comprehensive error handling with formatted display
-   - Live-updating curl command examples for API calls
+   - Add and remove credit cards
    
    **IMPORTANT SECURITY NOTE:** Please do not store the partner API key required for the webseed API call in your frontend code, as this poses a serious security risk. You'll need to implement a backend service that handles the API calls to webseed using the partner API key securely stored on your backend, and then pass the necessary data to your frontend.
 
-## Implementation Notes
-
-- The examples use React and modern JavaScript features
-- API endpoints are accessed through standard REST calls using Axios
-- Authentication is handled via user tokens
-- The booking flow follows MyTime's standard workflow:
-  1. Select location and service
-  2. Choose available time slots
-  3. Add to cart
-  4. User authentication
-  5. Booking confirmation
-
-## Getting Started with the API
+## Getting Started
 
 To use these examples:
 
-1. You'll need a MyTime company ID and API base URL
-2. Load the example HTML files in a web browser
-3. Enter your company ID and base URL in the provided form
-4. Follow the booking flow to test the integration
+1. Clone this repository
+2. Open the example HTML files in a web browser
+3. You'll need a MyTime company ID and API base URL
+4. Enter your credentials in the provided form
+5. Follow the flow to test the integration
+
+For detailed implementation instructions, refer to the README.md file in each example directory.
+
+## Security Considerations
+
+- Never store API keys or sensitive credentials in client-side code
+- Use HTTPS for all API calls
+- Follow best practices for handling user authentication tokens
+- Consider implementing a backend service for sensitive operations
 
 For detailed API documentation and endpoint specifications, refer to the [MyTime Public API Documentation](https://www.mytime.com/api/mkp/v1/docs).
