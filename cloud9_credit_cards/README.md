@@ -20,6 +20,15 @@ The example application in `index.html` demonstrates a complete credit card mana
 - **Tailwind CSS**: For styling the application with minimal custom CSS
 - **Cloud9**: For secure credit card processing via iframe
 
+## Cloud9 Environment Configuration
+
+This example uses Cloud9's test environment by default. For production deployments, you must change the URL:
+
+- **Test Environment**: `https://testvterm.c9pg.com/CreateCardToken`
+- **Production Environment**: `https://vterm.c9pg.com/CreateCardToken`
+
+To switch to the production environment, modify the `getIframeUrl` function in your code by setting `isProduction` to `true` or directly replacing the URL.
+
 ## How to Build a Similar Application
 
 ### 1. Set Up Your Project
@@ -295,7 +304,14 @@ const getIframeUrl = () => {
     if (!webseedData) return '';
     
     const stylingTemplate = "MyTime_SaveCard";
-    const vtermURL = "https://testvterm.c9pg.com/CreateCardToken";
+    
+    // IMPORTANT: Environment Configuration
+    // For test/development environments, use testvterm.c9pg.com
+    // For production environments, use vterm.c9pg.com
+    const isProduction = false; // Set to true for production environment
+    const vtermURL = isProduction 
+        ? "https://vterm.c9pg.com/CreateCardToken"
+        : "https://testvterm.c9pg.com/CreateCardToken";
     
     return `${vtermURL}?Template=${stylingTemplate}&WebGMID=${webseedData.merchant_id}&SeedTime=${webseedData.timestamp}&Seed=${webseedData.seed}&GTID=${webseedData.terminal_id}&KeyIndex=${webseedData.key_index}&CallbackVersion=2.0`;
 };
