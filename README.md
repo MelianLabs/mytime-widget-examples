@@ -55,6 +55,11 @@ Each example includes its own detailed README.md with step-by-step instructions 
 7. [**Cloud9 Credit Cards**](./cloud9_credit_cards/README.md) - Credit card management with Cloud9
    - Cloud9 iframe integration for secure credit card entry
    - Add and remove credit cards
+
+8. [**Purchase Packages**](./purchase_packages/README.md) - Complete package purchase flow with authentication
+   - User login and client record creation
+   - Browse and select packages (bundles)
+   - Add packages to cart and complete purchase with card ID
    
    **IMPORTANT SECURITY NOTE:** Please do not store the partner API key required for the webseed API call in your frontend code, as this poses a serious security risk. You'll need to implement a backend service that handles the API calls to webseed using the partner API key securely stored on your backend, and then pass the necessary data to your frontend.
 
