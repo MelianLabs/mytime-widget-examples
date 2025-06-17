@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Purchase Memberships</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [formData, setFormData] = React.useState({
+                baseUrl: '',
+                companyId: '',
+                email: '',
+                password: ''
+            });
+            const [companyData, setCompanyData] = React.useState(null);
+            const [locations, setLocations] = React.useState([]);
+            const [selectedLocation, setSelectedLocation] = React.useState(null);
+            const [memberships, setMemberships] = React.useState([]);
+            const [error, setError] = React.useState('');
+            const [successMessage, setSuccessMessage] = React.useState('');
+            const [cartItem, setCartItem] = React.useState(null);
+            const [authToken, setAuthToken] = React.useState('');
+            const [userData, setUserData] = React.useState(null);
+            const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+            const [isLoading, setIsLoading] = React.useState(false);
+            const [cardId, setCardId] = React.useState('');
+            const [completedPurchase, setCompletedPurchase] = React.useState(null);
+
+            React.useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const baseUrl = params.get('base_url');
+                const companyId = params.get('company_id');
+                
+                if (baseUrl && companyId) {
+                    setFormData({
+                        baseUrl,
+                        companyId
+                    });
+                    
+                    // Auto-submit if URL parameters are present
+                    // Using setTimeout to ensure formData is updated before submission
+                    setTimeout(() => {
+                        fetchCompanyData(baseUrl, companyId);
+                    }, 0);
+                }
+            }, []);
+
+            const handleLocationSelect = async (location) => {
+                setSelectedLocation(location);
+                setMemberships([]);
+                setError('');
+                setSuccessMessage('');
+                setCartItem(null);
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const membershipsResponse = await axios.get(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${location.company_id}/memberships?location_id=${location.id}&only_clients=false`
+                    );
+
+                    console.log('Memberships Response:', membershipsResponse.data);
+                    setMemberships(membershipsResponse.data.memberships || []);
+                } catch (err) {
+                    setError('Error fetching packages data. Please try again.');
+                    console.error('API Error:', err);
+                    if (err.response) {
+                        console.error('Error response:', err.response.data);
+                    }
+                }
+            };
+            
+            const handleAddToCart = async (membershipTemplateId, locationId) => {
+                setError('');
+                setSuccessMessage('');
+                setCartItem(null);
+                setCompletedPurchase(null);
+                
+                // Check if user is logged in
+                if (!isLoggedIn && formData.email && formData.password) {
+                    // Try to login first
+                    const token = await handleLogin(formData.baseUrl, formData.email, formData.password, formData.companyId);
+                    if (!token) {
+                        setError('Please login before adding items to cart');
+                        return;
+                    }
+                } else if (!isLoggedIn) {
+                    setError('Please login before adding items to cart');
+                    return;
+                }
+                
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    console.log(`Adding membership ${membershipTemplateId} at location ${locationId} to cart`);
+                    
+                    // Make the actual API call with authentication token
+                    const response = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/membership_purchases`,
+                        { membership_template_id: membershipTemplateId, location_id: locationId },
+                        { 
+                            headers: { 
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json',
+                                'Authorization': authToken
+                            } 
+                        }
+                    );
+                    
+                    console.log('Membership Purchase Response:', response.data);
+                    setCartItem({
+                        membershipTemplateId: membershipTemplateId,
+                        locationId: locationId,
+                        response: response.data
+                    });
+                    setSuccessMessage('Membership successfully added to cart!');
+                } catch (err) {
+                    setError('Error adding bundle to cart: ' + (err.response && err.response.data && err.response.data.error ? err.response.data.error : err.message));
+                    console.error('API Error:', err);
+                    if (err.response) {
+                        console.error('Error response:', err.response.data);
+                    }
+                }
+            };
+
+            const completePurchase = async (membershipPurchaseId) => {
+                setError('');
+                setSuccessMessage('');
+                setCompletedPurchase(null);
+                
+                if (!isLoggedIn || !authToken) {
+                    setError('You must be logged in to complete a purchase.');
+                    return;
+                }
+                
+                if (!cardId || cardId.trim() === '') {
+                    setError('Please enter a valid card ID.');
+                    return;
+                }
+                
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    
+const today = new Date().toISOString().split('T')[0];
+                    const response = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/membership_purchases/${membershipPurchaseId}/complete`,
+                        {
+                            token: cardId,
+                            payment_method: 'card',
+                            location_id: selectedLocation.id,
+                            start_date: today
+                        },
+                        { 
+                            headers: { 
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json',
+                                'Authorization': authToken
+                            } 
+                        }
+                    );
+                    
+                    console.log('Purchase completion response:', response.data);
+                    
+                    // Format the response data to match what we expect in the UI
+                    const purchaseData = {
+                        id: response.data.id,
+                        amount: response.data.amount,
+                        status: response.data.status || 'completed',
+                        confirmation: {
+                            id: response.data.confirmation_id || `purchase_${Date.now()}`
+                        },
+                        ...response.data
+                    };
+                    
+                    setSuccessMessage('Membership purchase completed successfully!');
+                    setCompletedPurchase(purchaseData);
+                    setCartItem(null);
+                    setCardId('');
+                } catch (err) {
+                    console.error('Error completing purchase:', err);
+                    setError(err.response ? `Error: ${JSON.stringify(err.response.data)}` : err.message);
+                }
+            };
+
+            // Extract the fetchCompanyData logic to be reusable
+            const fetchCompanyData = async (baseUrl, companyId) => {
+                setError('');
+                setSuccessMessage('');
+                setCartItem(null);
+                setCompanyData(null);
+                setLocations([]);
+                setSelectedLocation(null);
+                setMemberships([]);
+
+                if (!baseUrl || !companyId) {
+                    setError('Please provide both Base URL and Company ID');
+                    return;
+                }
+
+                try {
+                    const baseUrlWithoutTrailingSlash = baseUrl.replace(/\/$/, '');
+                    console.log('Making API calls to:', baseUrlWithoutTrailingSlash);
+                    
+                    const [companyResponse, locationsResponse] = await Promise.all([
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${companyId}?include_external_locations=false&include_gc_templates=false&include_env_fees=false&include_parent_settings=false&include_scripts=false&include_subscription=false&include_custom_fields=true&include_intake_forms=true&blocked=true`),
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${companyId}/locations?include_business_hours=true&include_mobility=true`)
+                    ]);
+
+                    console.log('Company Response:', companyResponse.data);
+                    console.log('Locations Response:', locationsResponse.data);
+
+                    if (companyResponse.data && companyResponse.data.company) {
+                        setCompanyData(companyResponse.data.company);
+                    } else {
+                        console.error('Invalid company response structure:', companyResponse.data);
+                        setError('Invalid company data structure received');
+                    }
+
+                    if (locationsResponse.data && Array.isArray(locationsResponse.data.locations)) {
+                        setLocations(locationsResponse.data.locations);
+                    } else {
+                        console.error('Invalid locations response structure:', locationsResponse.data);
+                        setError('Invalid locations data structure received');
+                    }
+                } catch (err) {
+                    setError('Error fetching data. Please check your inputs and try again.');
+                    console.error('API Error:', err);
+                    if (err.response) {
+                        console.error('Error response:', err.response.data);
+                    }
+                }
+            };
+
+            const createClientRecord = async (token, companyId, baseUrl) => {
+                try {
+                    const baseUrlWithoutTrailingSlash = baseUrl.replace(/\/$/, '');
+                    const response = await axios.put(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/client`,
+                        {
+                            company_id: parseInt(companyId),
+                            client: {
+                                preferred_language: "en-US"
+                            }
+                        },
+                        {
+                            headers: {
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json',
+                                'Authorization': token
+                            }
+                        }
+                    );
+                    console.log('Client record created successfully:', response.data);
+                    return true;
+                } catch (err) {
+                    console.error('Error creating client record:', err);
+                    // Don't fail the login process if client record creation fails
+                    return false;
+                }
+            };
+
+            const handleLogin = async (baseUrl, email, password, companyId) => {
+                setIsLoading(true);
+                setError('');
+                setSuccessMessage('');
+                
+                try {
+                    const baseUrlWithoutTrailingSlash = baseUrl.replace(/\/$/, '');
+                    console.log('Attempting login...');
+                    
+                    const loginResponse = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/sessions`,
+                        {
+                            email: email,
+                            password: password,
+                            company_id: parseInt(companyId),
+                            recaptcha_token: null
+                        },
+                        {
+                            headers: {
+                                'Accept': 'application/json'
+                            }
+                        }
+                    );
+                    
+                    console.log('Login Response:', loginResponse.data);
+                    
+                    if (loginResponse.data && loginResponse.data.user && loginResponse.data.user.authentication_token) {
+                        const token = loginResponse.data.user.authentication_token;
+                        setAuthToken(token);
+                        setUserData(loginResponse.data.user);
+                        setIsLoggedIn(true);
+                        
+                        // Create client record after successful login
+                        const clientRecordCreated = await createClientRecord(token, companyId, baseUrl);
+                        
+                        setSuccessMessage(clientRecordCreated ? 
+                            'Login successful! Client record created.' : 
+                            'Login successful! Note: Client record creation may have failed.');
+                        return token;
+                    } else {
+                        throw new Error('Invalid login response');
+                    }
+                } catch (err) {
+                    let errorMessage = 'Login failed';
+                    if (err.response && err.response.data) {
+                        errorMessage = JSON.stringify(err.response.data, null, 2);
+                    } else if (err.message) {
+                        errorMessage = err.message;
+                    }
+                    setError(errorMessage);
+                    console.error('Login Error:', err);
+                    return null;
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+            
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                
+                // Validate form data
+                if (!formData.baseUrl || !formData.companyId) {
+                    setError('Base URL and Company ID are required.');
+                    return;
+                }
+                
+                // If email and password are provided, attempt login first
+                if (formData.email && formData.password) {
+                    const token = await handleLogin(formData.baseUrl, formData.email, formData.password, formData.companyId);
+                    if (token) {
+                        // Login successful, now fetch company data
+                        await fetchCompanyData(formData.baseUrl, formData.companyId);
+                    }
+                } else {
+                    // No login credentials, just fetch company data
+                    await fetchCompanyData(formData.baseUrl, formData.companyId);
+                }
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto">
+                    <h1 className="text-2xl font-bold mb-6 text-center">MyTime Membership Purchase</h1>
+                    
+                    <form onSubmit={handleSubmit} className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="baseUrl">
+                                Base URL
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="baseUrl"
+                                type="text"
+                                value={formData.baseUrl}
+                                onChange={(e) => setFormData(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                placeholder="www.mytime.com"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Can be set via URL parameter: ?base_url=www.mytime.com</p>
+                        </div>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyId">
+                                Company ID
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="companyId"
+                                type="text"
+                                value={formData.companyId}
+                                onChange={(e) => setFormData(prev => ({ ...prev, companyId: e.target.value }))}
+                                placeholder="40426"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Can be set via URL parameter: ?company_id=40426</p>
+                        </div>
+                        {!isLoggedIn && (
+                            <div>
+                                <div className="mb-4">
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
+                                        Email
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="email"
+                                        type="email"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                                        placeholder="user@example.com"
+                                    />
+                                </div>
+                                <div className="mb-6">
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
+                                        Password
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="password"
+                                        type="password"
+                                        value={formData.password}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                                        placeholder="••••••••"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        <div className="flex items-center justify-between">
+                            <button
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                type="submit"
+                                disabled={isLoading}
+                            >
+                                {isLoading ? 'Loading...' : isLoggedIn ? 'Refresh Data' : 'Submit'}
+                            </button>
+                            {isLoggedIn && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsLoggedIn(false);
+                                        setAuthToken('');
+                                        setUserData(null);
+                                    }}
+                                    className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                >
+                                    Logout
+                                </button>
+                            )}
+                        </div>
+                    </form>
+                    
+                    {isLoggedIn && userData && (
+                        <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4">
+                            <h2 className="font-bold text-lg mb-2">Logged In User</h2>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <p className="font-bold mb-1">Name</p>
+                                    <p>{userData.first_name} {userData.last_name}</p>
+                                </div>
+                                <div>
+                                    <p className="font-bold mb-1">Email</p>
+                                    <p>{userData.email}</p>
+                                </div>
+                                <div>
+                                    <p className="font-bold mb-1">User ID</p>
+                                    <p>{userData.id}</p>
+                                </div>
+                                <div>
+                                    <p className="font-bold mb-1">Authentication Token</p>
+                                    <p className="font-mono text-xs break-all">{authToken.substring(0, 20)}...</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <span className="block sm:inline">{error}</span>
+                        </div>
+                    )}
+
+                    {companyData && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Company Information</h2>
+                            <p><span className="font-bold">ID:</span> {companyData.id}</p>
+                            <p><span className="font-bold">Name:</span> {companyData.name}</p>
+                        </div>
+                    )}
+
+                    {locations.length > 0 && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Locations</h2>
+                            <div className="space-y-4">
+                                {locations.map(location => (
+                                    <div key={location.id} className="border-b pb-4">
+                                        <p><span className="font-bold">ID:</span> {location.id}</p>
+                                        <p><span className="font-bold">Nickname:</span> {location.nickname}</p>
+                                        <p><span className="font-bold">Address:</span> {location.street_address}</p>
+                                        <p><span className="font-bold">City:</span> {location.city}</p>
+                                        <p><span className="font-bold">State:</span> {location.state}</p>
+                                        <p><span className="font-bold">Country:</span> {location.country}</p>
+                                        <button
+                                            onClick={() => handleLocationSelect(location)}
+                                            className={`mt-4 px-4 py-2 rounded font-bold ${selectedLocation && selectedLocation.id === location.id ? 'bg-green-500 text-white' : 'bg-blue-500 hover:bg-blue-700 text-white'}`}
+                                        >
+                                            {selectedLocation && selectedLocation.id === location.id ? 'Selected' : 'Select Location'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedLocation && memberships.length > 0 && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Available Memberships</h2>
+                            <div className="space-y-6">
+                                {memberships.map(membership => (
+                                    <div key={membership.id} className="border rounded-lg p-4">
+                                        <h3 className="text-lg font-bold mb-2">{membership.name}</h3>
+                                        {membership.description && (
+                                            <p className="text-gray-600 mb-2">{membership.description}</p>
+                                        )}
+                                        <p className="text-lg font-bold text-blue-600">${membership.price}</p>
+                                        <div className="mt-4">
+                                            <div className="mt-2">
+                                                <p className="font-bold">Membership Benefits:</p>
+                                                <ul className="list-disc pl-5 mt-1">
+                                                    {membership.membership_benefits && membership.membership_benefits.map((benefit, index) => (
+                                                        <li key={index} className="text-sm">
+                                                            {benefit.label}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                            <button 
+                                                onClick={() => handleAddToCart(membership.id, selectedLocation.id)}
+                                                className="mt-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                                            >
+                                                Purchase Membership
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedLocation && memberships.length === 0 && (
+                        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
+                            <p>No memberships available at this location.</p>
+                        </div>
+                    )}
+
+                    {successMessage && (
+                        <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <span className="block sm:inline">{successMessage}</span>
+                        </div>
+                    )}
+
+                    {cartItem && !completedPurchase && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Added to Cart</h2>
+                            <div className="mt-6">
+                                <h3 className="font-bold mb-2">Complete Membership Purchase</h3>
+                                <div className="mb-4">
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="cardId">
+                                        Payment Method Token
+                                    </label>
+                                    <input
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        id="cardId"
+                                        type="text"
+                                        value={cardId}
+                                        onChange={(e) => setCardId(e.target.value)}
+                                        placeholder="Enter payment method token (e.g., cus_...|pm_...)"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">For testing, you can use a test token from Stripe</p>
+                                </div>
+                                <button
+                                    onClick={() => completePurchase(cartItem.response.id)}
+                                    className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                >
+                                    Complete Membership Purchase
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {completedPurchase && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4 text-green-600">Membership Purchase Completed Successfully</h2>
+                            <div className="bg-green-50 border border-green-200 p-4 rounded mb-4">
+                                <p className="font-bold">Membership Purchase ID: {completedPurchase.id}</p>
+                                <p>Status: <span className="font-semibold text-green-600">{completedPurchase.status || 'completed'}</span></p>
+                                <p>Amount: ${completedPurchase.amount}</p>
+                                {completedPurchase.confirmation && completedPurchase.confirmation.id && (
+                                    <p>Confirmation ID: {completedPurchase.confirmation.id}</p>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

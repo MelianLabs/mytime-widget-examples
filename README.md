@@ -44,7 +44,12 @@ Each example includes its own detailed README.md with step-by-step instructions 
    - Form fields for user information
    - Success state showing user details
 
-5. [**Stripe Add/Remove Credit Card**](./stripe_add_remove_credit_card/README.md) - Manage credit cards with Stripe
+5. [**Purchase Memberships**](./purchase_memberships/README.md) - Purchase memberships through the API
+   - Browse and select memberships by location
+   - Complete purchases with payment method tokens
+   - View purchase confirmation and details
+
+6. [**Stripe Add/Remove Credit Card**](./stripe_add_remove_credit_card/README.md) - Manage credit cards with Stripe
    - Secure credit card entry with Stripe Elements
    - View and delete existing cards
 
