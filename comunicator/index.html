@@ -41,6 +41,7 @@
             const [loadingMoreMessages, setLoadingMoreMessages] = React.useState({});
             const [newMessage, setNewMessage] = React.useState({});
             const [sendingMessage, setSendingMessage] = React.useState({});
+            const [markingMessagesAsRead, setMarkingMessagesAsRead] = React.useState(false);
 
             // Load URL parameters on component mount
             React.useEffect(() => {
@@ -63,6 +64,13 @@
                     }));
                 }
             }, []);
+
+            // Mark messages as read when they are displayed
+            React.useEffect(() => {
+                if (selectedLocation && locationMessages[selectedLocation]) {
+                    markMessagesAsRead(locationMessages[selectedLocation]);
+                }
+            }, [selectedLocation, locationMessages]);
 
             const fetchLocationMessages = async (locationId, createdBefore = null) => {
                 if (!locationId || !formData.baseUrl || !authToken) return;
@@ -157,6 +165,60 @@
                 }
             };
 
+            const markMessagesAsRead = async (messages) => {
+                if (!messages || messages.length === 0 || !authToken || markingMessagesAsRead) return;
+                
+                // Filter for unread outgoing messages
+                const unreadMessageIds = messages
+                    .filter(msg => msg.outgoing && !msg.read_at)
+                    .map(msg => msg.id);
+                
+                if (unreadMessageIds.length === 0) return;
+                
+                setMarkingMessagesAsRead(true);
+                
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    await axios.put(
+                        `${baseUrlWithoutTrailingSlash}/my_client/users/messages/mark_messages_read.json`,
+                        {
+                            messages: unreadMessageIds,
+                            auth_token: authToken,
+                            company_id: formData.companyId
+                        },
+                        {
+                            headers: {
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json'
+                            }
+                        }
+                    );
+                    
+                    // Update the read_at property for these messages in our state
+                    setLocationMessages(prev => {
+                        const updatedMessages = { ...prev };
+                        
+                        Object.keys(updatedMessages).forEach(locationId => {
+                            if (updatedMessages[locationId]) {
+                                updatedMessages[locationId] = updatedMessages[locationId].map(msg => {
+                                    if (unreadMessageIds.includes(msg.id)) {
+                                        return { ...msg, read_at: new Date().toISOString() };
+                                    }
+                                    return msg;
+                                });
+                            }
+                        });
+                        
+                        return updatedMessages;
+                    });
+                    
+                } catch (err) {
+                    console.error('Error marking messages as read:', err);
+                } finally {
+                    setMarkingMessagesAsRead(false);
+                }
+            };
+            
             const handleLocationClick = async (locationId) => {
                 setSelectedLocation(selectedLocation === locationId ? null : locationId);
                 
