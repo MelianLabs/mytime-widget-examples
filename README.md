@@ -65,6 +65,12 @@ Each example includes its own detailed README.md with step-by-step instructions 
    - User login and client record creation
    - Browse and select packages (bundles)
    - Add packages to cart and complete purchase with card ID
+
+9. [**Communicator**](./comunicator/README.md) - Client-staff messaging interface
+   - View and send messages across company locations
+   - Infinite scrolling for message history
+   - Real-time message updates with automatic polling
+   - Mark messages as read automatically
    
    **IMPORTANT SECURITY NOTE:** Please do not store the partner API key required for the webseed API call in your frontend code, as this poses a serious security risk. You'll need to implement a backend service that handles the API calls to webseed using the partner API key securely stored on your backend, and then pass the necessary data to your frontend.
 

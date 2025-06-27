@@ -42,6 +42,7 @@
             const [newMessage, setNewMessage] = React.useState({});
             const [sendingMessage, setSendingMessage] = React.useState({});
             const [markingMessagesAsRead, setMarkingMessagesAsRead] = React.useState(false);
+            const [pollingInterval, setPollingInterval] = React.useState(null);
 
             // Load URL parameters on component mount
             React.useEffect(() => {
@@ -71,6 +72,57 @@
                     markMessagesAsRead(locationMessages[selectedLocation]);
                 }
             }, [selectedLocation, locationMessages]);
+            
+            // Set up polling for new messages every 30 seconds
+            React.useEffect(() => {
+                // Only set up polling if user is logged in
+                if (isLoggedIn && authToken) {
+                    // Clear any existing interval first
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                    }
+                    
+                    // Function to refresh messages
+                    const refreshMessages = async () => {
+                        try {
+                            // Fetch unread messages
+                            const unreadMsgs = await fetchUnreadMessages(formData.baseUrl, formData.companyId, authToken);
+                            
+                            // Create a map of location_id to unread count
+                            const unreadMap = {};
+                            unreadMsgs.forEach(msg => {
+                                unreadMap[msg.location_id] = msg.unread;
+                            });
+                            
+                            // Update unread counts for locations
+                            setLocations(prev => prev.map(location => ({
+                                ...location,
+                                unread: unreadMap[location.id] || 0
+                            })));
+                            
+                            setUnreadMessages(unreadMsgs);
+                            
+                            // If a location is selected, refresh its messages
+                            if (selectedLocation) {
+                                await fetchLocationMessages(selectedLocation);
+                            }
+                        } catch (err) {
+                            console.error('Error polling for new messages:', err);
+                        }
+                    };
+                    
+                    // Set up the interval (30 seconds = 30000 ms)
+                    const interval = setInterval(refreshMessages, 30000);
+                    setPollingInterval(interval);
+                    
+                    // Clean up function
+                    return () => {
+                        if (interval) {
+                            clearInterval(interval);
+                        }
+                    };
+                }
+            }, [isLoggedIn, authToken, formData.baseUrl, formData.companyId, selectedLocation]);
 
             const fetchLocationMessages = async (locationId, createdBefore = null) => {
                 if (!locationId || !formData.baseUrl || !authToken) return;
