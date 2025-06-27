@@ -568,15 +568,11 @@
                             </div>
                             
                             <div className="mt-6">
-                                <h3 className="text-lg font-bold mb-4">Unread Messages</h3>
+                                <h3 className="text-lg font-bold mb-4">Locations</h3>
                                 {isLoadingMessages ? (
-                                    <p>Loading messages...</p>
+                                    <p>Loading locations...</p>
                                 ) : messagesError ? (
-                                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-                                        {messagesError}
-                                    </div>
-                                ) : unreadMessages.length === 0 ? (
-                                    <p>No unread messages</p>
+                                    <p className="text-red-500">{messagesError}</p>
                                 ) : (
                                     <div className="space-y-4">
                                             {locations.map((location, index) => {
