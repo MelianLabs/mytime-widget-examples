@@ -37,6 +37,8 @@
             const [selectedLocation, setSelectedLocation] = React.useState(null);
             const [locationMessages, setLocationMessages] = React.useState({});
             const [isLoadingLocationMessages, setIsLoadingLocationMessages] = React.useState({});
+            const [hasMoreMessages, setHasMoreMessages] = React.useState({});
+            const [loadingMoreMessages, setLoadingMoreMessages] = React.useState({});
 
             // Load URL parameters on component mount
             React.useEffect(() => {
@@ -60,44 +62,96 @@
                 }
             }, []);
 
-            const fetchLocationMessages = async (locationId) => {
+            const fetchLocationMessages = async (locationId, createdBefore = null) => {
                 if (!locationId || !formData.baseUrl || !authToken) return;
 
-                setIsLoadingLocationMessages(prev => ({
-                    ...prev,
-                    [locationId]: true
-                }));
+                if (!createdBefore) {
+                    setIsLoadingLocationMessages(prev => ({
+                        ...prev,
+                        [locationId]: true
+                    }));
+                } else {
+                    setLoadingMoreMessages(prev => ({
+                        ...prev,
+                        [locationId]: true
+                    }));
+                }
 
                 try {
                     const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const params = {
+                        auth_token: authToken,
+                        location_ids: locationId
+                    };
+                    
+                    if (createdBefore) {
+                        params.created_before = createdBefore;
+                    }
+                    
                     const response = await axios.get(
                         `${baseUrlWithoutTrailingSlash}/my_client/users/messages`,
                         {
-                            params: {
-                                auth_token: authToken,
-                                location_ids: locationId
-                            },
+                            params,
                             headers: {
                                 'Accept': 'application/json'
                             }
                         }
                     );
 
-                    setLocationMessages(prev => ({
+                    const messages = response.data.messages || [];
+                    
+                    // Update hasMoreMessages state based on whether we received any messages
+                    setHasMoreMessages(prev => ({
                         ...prev,
-                        [locationId]: response.data.messages || []
+                        [locationId]: messages.length === 6 // If we got exactly 6 messages, there might be more
                     }));
 
-                    return response.data.messages || [];
+                    if (createdBefore) {
+                        // Append new messages to existing ones
+                        setLocationMessages(prev => ({
+                            ...prev,
+                            [locationId]: [...(prev[locationId] || []), ...messages]
+                        }));
+                    } else {
+                        // Replace existing messages
+                        setLocationMessages(prev => ({
+                            ...prev,
+                            [locationId]: messages
+                        }));
+                    }
+
+                    return messages;
                 } catch (err) {
                     console.error('Error fetching location messages:', err);
                     setMessagesError('Failed to load messages for this location. Please try again.');
                     return [];
                 } finally {
-                    setIsLoadingLocationMessages(prev => ({
-                        ...prev,
-                        [locationId]: false
-                    }));
+                    if (!createdBefore) {
+                        setIsLoadingLocationMessages(prev => ({
+                            ...prev,
+                            [locationId]: false
+                        }));
+                    } else {
+                        setLoadingMoreMessages(prev => ({
+                            ...prev,
+                            [locationId]: false
+                        }));
+                    }
+                }
+            };
+            
+            const loadMoreMessages = async (locationId) => {
+                if (!locationId || !locationMessages[locationId] || loadingMoreMessages[locationId]) return;
+                
+                const messages = locationMessages[locationId];
+                if (messages.length === 0) return;
+                
+                // Get the oldest message's created_at date
+                const oldestMessage = messages[messages.length - 1];
+                if (oldestMessage && oldestMessage.created_at) {
+                    // Convert created_at to timestamp (seconds since epoch)
+                    const timestamp = Math.floor(new Date(oldestMessage.created_at).getTime());
+                    await fetchLocationMessages(locationId, timestamp);
                 }
             };
 
@@ -445,35 +499,63 @@
                                                                     </svg>
                                                                 </div>
                                                             ) : (
-                                                                <div className="space-y-3">
+                                                                <div className="space-y-3 max-h-96 overflow-y-auto" 
+                                                                    id={`message-container-${location.id}`}
+                                                                    onScroll={(e) => {
+                                                                        const container = e.target;
+                                                                        // If scrolled to bottom and we have more messages
+                                                                        if (container.scrollHeight - container.scrollTop <= container.clientHeight + 50 && 
+                                                                            hasMoreMessages[location.id] && 
+                                                                            !loadingMoreMessages[location.id]) {
+                                                                            loadMoreMessages(location.id);
+                                                                        }
+                                                                    }}
+                                                                >
                                                                     {locationMessages[location.id] && locationMessages[location.id].length > 0 ? (
-                                                                        locationMessages[location.id].map((msg, msgIndex) => (
-                                                                            <div key={msgIndex} className="border-b pb-3 last:border-b-0 last:pb-0 last:mb-0">
-                                                                                <div className="flex justify-between items-start">
-                                                                                    <div className="flex-1">
-                                                                                        <div className="flex items-center justify-between">
-                                                            <span className="font-medium">
-                                                                {msg.emp_fullname || 'Staff'}
-                                                            </span>
-                                                            <span className="text-xs text-gray-500 whitespace-nowrap ml-2">
-                                                                {new Date(msg.created_at).toLocaleString()}
-                                                            </span>
-                                                        </div>
-                                                        <p className="mt-1 text-sm text-gray-700 whitespace-pre-line">{msg.content || 'No content'}</p>
-                                                        {!msg.read_at && !msg.outgoing && (
-                                                            <span className="inline-block mt-1 text-xs text-blue-600">
-                                                                New
-                                                            </span>
-                                                        )}
-                                                        {msg.outgoing && (
-                                                            <span className="inline-block mt-1 text-xs text-gray-500">
-                                                                {msg.read_at ? 'Read' : 'Sent'}
-                                                            </span>
-                                                        )}
+                                                                        <div>
+                                                                            {locationMessages[location.id].map((msg, msgIndex) => (
+                                                                                <div key={msgIndex} className="border-b pb-3 last:border-b-0 last:pb-0 last:mb-0">
+                                                                                    <div className="flex justify-between items-start">
+                                                                                        <div className="flex-1">
+                                                                                            <div className="flex items-center justify-between">
+                                                                <span className="font-medium">
+                                                                    {msg.emp_fullname || 'Staff'}
+                                                                </span>
+                                                                <span className="text-xs text-gray-500 whitespace-nowrap ml-2">
+                                                                    {new Date(msg.created_at).toLocaleString()}
+                                                                </span>
+                                                            </div>
+                                                            <p className="mt-1 text-sm text-gray-700 whitespace-pre-line">{msg.content || 'No content'}</p>
+                                                            {!msg.read_at && !msg.outgoing && (
+                                                                <span className="inline-block mt-1 text-xs text-blue-600">
+                                                                    New
+                                                                </span>
+                                                            )}
+                                                            {msg.outgoing && (
+                                                                <span className="inline-block mt-1 text-xs text-gray-500">
+                                                                    {msg.read_at ? 'Read' : 'Sent'}
+                                                                </span>
+                                                            )}
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
-                                                                            </div>
-                                                                        ))
+                                                                            ))}
+                                                                            
+                                                                            {loadingMoreMessages[location.id] && (
+                                                                                <div className="text-center py-2">
+                                                                                    <svg className="animate-spin h-4 w-4 text-blue-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                                                    </svg>
+                                                                                </div>
+                                                                            )}
+                                                                            
+                                                                            {!hasMoreMessages[location.id] && locationMessages[location.id].length > 6 && (
+                                                                                <div className="text-center py-2 text-xs text-gray-500">
+                                                                                    No more messages
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     ) : (
                                                                         <p className="text-gray-500 text-center py-2">No messages found for this location</p>
                                                                     )}
