@@ -412,7 +412,7 @@ The application supports the following URL parameters for quick testing:
 
 Example URL:
 ```
-index.html?base_url=https://api.mytime.com&company_id=123&email=user@example.com&password=yourpassword
+index.html?base_url=https://www.mytime.com&company_id=123&email=user@example.com&password=yourpassword
 ```
 
 ## Security Considerations

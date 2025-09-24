@@ -417,7 +417,7 @@ The application supports the following URL parameters:
 - `base_url`: The base URL for the MyTime API
 - `company_id`: The ID of the company to associate with the user
 
-Example: `index.html?base_url=https://api.mytime.com&company_id=12345`
+Example: `index.html?base_url=https://www.mytime.com&company_id=12345`
 
 ## Best Practices
 

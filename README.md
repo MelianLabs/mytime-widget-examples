@@ -71,6 +71,12 @@ Each example includes its own detailed README.md with step-by-step instructions 
    - Infinite scrolling for message history
    - Real-time message updates with automatic polling
    - Mark messages as read automatically
+
+10. [**ACH Setup**](./ach_setup/README.md) - ACH payment setup integration
+    - User authentication and client record creation
+    - ACH access token generation
+    - Automatic ACH widget opening with company configuration
+    - Manual token regeneration and widget access controls
    
    **IMPORTANT SECURITY NOTE:** Please do not store the partner API key required for the webseed API call in your frontend code, as this poses a serious security risk. You'll need to implement a backend service that handles the API calls to webseed using the partner API key securely stored on your backend, and then pass the necessary data to your frontend.
 

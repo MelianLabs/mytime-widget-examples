@@ -476,7 +476,7 @@ The application supports the following URL parameters:
 - `gc_id`: The ID of the gift card (used in payment callbacks)
 - `payment_status`: The status of the payment (used in payment callbacks)
 
-Example: `index.html?base_url=https://api.mytime.com&company_id=12345`
+Example: `index.html?base_url=https://www.mytime.com&company_id=12345`
 
 ## Best Practices
 

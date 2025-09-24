@@ -493,7 +493,7 @@ The application supports the following URL parameters:
 - `email`: The user's email address
 - `password`: The user's password
 
-Example: `index.html?base_url=https://api.mytime.com&company_id=12345&email=user@example.com&password=yourpassword`
+Example: `index.html?base_url=https://www.mytime.com&company_id=12345&email=user@example.com&password=yourpassword`
 
 ## Security Considerations
 

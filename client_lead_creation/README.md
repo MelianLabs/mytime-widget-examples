@@ -276,7 +276,7 @@ The application supports the following URL parameters:
 - `company_id`: The ID of the company to create the client/lead for
 - `partner_api_key`: The partner API key for authentication (see security note below)
 
-Example: `index.html?base_url=https://api.mytime.com&company_id=12345`
+Example: `index.html?base_url=https://www.mytime.com&company_id=12345`
 
 ## Security Considerations
 

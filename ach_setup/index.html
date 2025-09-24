@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyTime ACH Setup</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [formData, setFormData] = React.useState({
+                baseUrl: '',
+                companyId: '',
+                email: '',
+                password: ''
+            });
+            const [error, setError] = React.useState('');
+            const [successMessage, setSuccessMessage] = React.useState('');
+            const [authToken, setAuthToken] = React.useState('');
+            const [userData, setUserData] = React.useState(null);
+            const [clientId, setClientId] = React.useState('');
+            const [accessToken, setAccessToken] = React.useState('');
+            const [companyData, setCompanyData] = React.useState(null);
+            const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+            const [isLoading, setIsLoading] = React.useState(false);
+            const [isGeneratingToken, setIsGeneratingToken] = React.useState(false);
+
+            // Load URL parameters on component mount
+            React.useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const baseUrl = params.get('base_url');
+                const companyId = params.get('company_id');
+                const email = params.get('email');
+                const password = params.get('password');
+                
+                const newFormData = {};
+                if (baseUrl) newFormData.baseUrl = baseUrl;
+                if (companyId) newFormData.companyId = companyId;
+                if (email) newFormData.email = email;
+                if (password) newFormData.password = password;
+                
+                if (Object.keys(newFormData).length > 0) {
+                    setFormData(prev => ({
+                        ...prev,
+                        ...newFormData
+                    }));
+                }
+            }, []);
+
+            const createClientRecord = async (token, companyId, baseUrl) => {
+                try {
+                    const baseUrlWithoutTrailingSlash = baseUrl.replace(/\/$/, '');
+                    const response = await axios.put(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/client`,
+                        {
+                            company_id: parseInt(companyId),
+                            client: {
+                                preferred_language: "en-US"
+                            }
+                        },
+                        {
+                            headers: {
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json',
+                                'Authorization': token
+                            }
+                        }
+                    );
+                    console.log('Client record created successfully:', response.data);
+                    
+                    // Extract client ID from response
+                    if (response.data && response.data.client && response.data.client.id) {
+                        setClientId(response.data.client.id);
+                        return response.data.client.id;
+                    }
+                    return null;
+                } catch (err) {
+                    console.error('Error creating client record:', err);
+                    throw err;
+                }
+            };
+
+            const generateACHAccessToken = async (baseUrl, companyId, clientId, token) => {
+                setIsGeneratingToken(true);
+                setError('');
+                
+                try {
+                    const baseUrlWithoutTrailingSlash = baseUrl.replace(/\/$/, '');
+                    const response = await axios.get(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/ach/generate_access_token`,
+                        {
+                            params: {
+                                company_id: companyId,
+                                client_id: clientId
+                            },
+                            headers: {
+                                'Accept': 'application/json',
+                                'Authorization': token
+                            }
+                        }
+                    );
+                    
+                    console.log('ACH Access Token Response:', response.data);
+                    
+                    if (response.data && response.data.access_token) {
+                        setAccessToken(response.data.access_token);
+                        setSuccessMessage('ACH access token generated successfully!');
+                        
+                        // If company data has ach_widget_base_url, open the widget
+                        if (companyData && companyData.ach_widget_base_url) {
+                            const widgetUrl = `${companyData.ach_widget_base_url}?access_token=${response.data.access_token}`;
+                            window.open(widgetUrl, '_blank');
+                        }
+                        
+                        return response.data.access_token;
+                    } else {
+                        throw new Error('No access token in response');
+                    }
+                } catch (err) {
+                    console.error('Error generating ACH access token:', err);
+                    let errorMessage = 'Failed to generate ACH access token';
+                    if (err.response && err.response.data) {
+                        errorMessage = JSON.stringify(err.response.data, null, 2);
+                    } else if (err.message) {
+                        errorMessage = err.message;
+                    }
+                    setError(errorMessage);
+                    throw err;
+                } finally {
+                    setIsGeneratingToken(false);
+                }
+            };
+
+            const handleLogin = async (baseUrl, email, password, companyId) => {
+                setIsLoading(true);
+                setError('');
+                setSuccessMessage('');
+                
+                try {
+                    const baseUrlWithoutTrailingSlash = baseUrl.replace(/\/$/, '');
+                    
+                    const loginResponse = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/sessions`,
+                        {
+                            email: email,
+                            password: password,
+                            company_id: parseInt(companyId),
+                            recaptcha_token: null
+                        },
+                        {
+                            headers: {
+                                'Accept': 'application/json'
+                            }
+                        }
+                    );
+                    
+                    if (loginResponse.data && loginResponse.data.user && loginResponse.data.user.authentication_token) {
+                        const token = loginResponse.data.user.authentication_token;
+                        setAuthToken(token);
+                        setUserData(loginResponse.data.user);
+                        setIsLoggedIn(true);
+                        
+                        // Fetch company data
+                        try {
+                            const companyResponse = await axios.get(
+                                `${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${companyId}?include_external_locations=false&include_gc_templates=true&include_env_fees=true&include_parent_settings=false&include_scripts=true&include_subscription=true&include_custom_fields=false&include_intake_forms=false&include_consumer_app=false`,
+                                {
+                                    headers: {
+                                        'Accept': 'application/json',
+                                        'Authorization': token
+                                    }
+                                }
+                            );
+
+                            if (companyResponse.data && companyResponse.data.company) {
+                                setCompanyData(companyResponse.data.company);
+                                console.log('Company data fetched:', companyResponse.data.company);
+                            }
+                        } catch (companyErr) {
+                            console.error('Error fetching company data:', companyErr);
+                            // Don't fail the login process if company data fetch fails
+                        }
+                        
+                        // Create client record after successful login
+                        try {
+                            const clientId = await createClientRecord(token, companyId, baseUrl);
+                            if (clientId) {
+                                setSuccessMessage('Login successful! Client record created.');
+                                // Automatically generate ACH access token
+                                await generateACHAccessToken(baseUrl, companyId, clientId, token);
+                            } else {
+                                setSuccessMessage('Login successful! Warning: Could not extract client ID.');
+                            }
+                        } catch (clientErr) {
+                            console.error('Client record creation failed:', clientErr);
+                            setError('Login successful but client record creation failed: ' + clientErr.message);
+                        }
+                        
+                        return token;
+                    } else {
+                        throw new Error('Invalid login response');
+                    }
+                } catch (err) {
+                    let errorMessage = 'Login failed';
+                    if (err.response && err.response.data) {
+                        errorMessage = JSON.stringify(err.response.data, null, 2);
+                    } else if (err.message) {
+                        errorMessage = err.message;
+                    }
+                    setError(errorMessage);
+                    console.error('Login Error:', err);
+                    return null;
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+            
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                
+                // Validate form data
+                if (!formData.baseUrl || !formData.companyId || !formData.email || !formData.password) {
+                    setError('All fields are required.');
+                    return;
+                }
+                
+                await handleLogin(formData.baseUrl, formData.email, formData.password, formData.companyId);
+            };
+
+            const handleInputChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({
+                    ...prev,
+                    [name]: value
+                }));
+            };
+
+            const handleLogout = () => {
+                setIsLoggedIn(false);
+                setAuthToken('');
+                setUserData(null);
+                setClientId('');
+                setAccessToken('');
+                setCompanyData(null);
+                setSuccessMessage('You have been logged out.');
+                setError('');
+            };
+
+            const handleRegenerateToken = async () => {
+                if (clientId && formData.companyId && formData.baseUrl && authToken) {
+                    await generateACHAccessToken(formData.baseUrl, formData.companyId, clientId, authToken);
+                } else {
+                    setError('Missing required data to regenerate token. Please login again.');
+                }
+            };
+
+            const handleOpenACHWidget = () => {
+                if (companyData && companyData.ach_widget_base_url && accessToken) {
+                    const widgetUrl = `${companyData.ach_widget_base_url}?access_token=${accessToken}`;
+                    window.open(widgetUrl, '_blank');
+                } else {
+                    setError('Missing ACH widget URL or access token. Please ensure company data is loaded and token is generated.');
+                }
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto">
+                    <h1 className="text-2xl font-bold mb-6 text-center">MyTime ACH Setup</h1>
+                    
+                    {!isLoggedIn ? (
+                        <form onSubmit={handleSubmit} className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <div className="mb-4">
+                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="baseUrl">
+                                    Base URL
+                                </label>
+                                <input
+                                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                    id="baseUrl"
+                                    type="text"
+                                    name="baseUrl"
+                                    value={formData.baseUrl}
+                                    onChange={handleInputChange}
+                                    placeholder="www.mytime.com"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Can be set via URL parameter: ?base_url=www.mytime.com</p>
+                            </div>
+                            <div className="mb-4">
+                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyId">
+                                    Company ID
+                                </label>
+                                <input
+                                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                    id="companyId"
+                                    type="text"
+                                    name="companyId"
+                                    value={formData.companyId}
+                                    onChange={handleInputChange}
+                                    placeholder="40426"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Can be set via URL parameter: ?company_id=40426</p>
+                            </div>
+                            <div className="mb-4">
+                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
+                                    Email
+                                </label>
+                                <input
+                                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                    id="email"
+                                    type="email"
+                                    name="email"
+                                    value={formData.email}
+                                    onChange={handleInputChange}
+                                    placeholder="user@example.com"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Can be set via URL parameter: ?email=user@example.com</p>
+                            </div>
+                            <div className="mb-6">
+                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
+                                    Password
+                                </label>
+                                <input
+                                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
+                                    id="password"
+                                    type="password"
+                                    name="password"
+                                    value={formData.password}
+                                    onChange={handleInputChange}
+                                    placeholder="******************"
+                                />
+                                <p className="text-xs text-gray-500">Note: It's not recommended to pass passwords via URL for security reasons.</p>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <button
+                                    className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                    type="submit"
+                                    disabled={isLoading}
+                                >
+                                    {isLoading ? 'Logging in...' : 'Sign In & Setup ACH'}
+                                </button>
+                            </div>
+                        </form>
+                    ) : (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-xl font-bold">Welcome, {userData.first_name}!</h2>
+                                <button
+                                    onClick={handleLogout}
+                                    className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm"
+                                >
+                                    Logout
+                                </button>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                <div className="bg-gray-50 p-4 rounded">
+                                    <h3 className="font-bold mb-2">User Information</h3>
+                                    <p><span className="font-semibold">Name:</span> {userData.first_name} {userData.last_name}</p>
+                                    <p><span className="font-semibold">Email:</span> {userData.email}</p>
+                                    <p><span className="font-semibold">User ID:</span> {userData.id}</p>
+                                    {userData.phone && <p><span className="font-semibold">Phone:</span> {userData.phone}</p>}
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded">
+                                    <h3 className="font-bold mb-2">Authentication</h3>
+                                    <p><span className="font-semibold">Token:</span> {authToken.substring(0, 15)}...</p>
+                                    <p><span className="font-semibold">Company ID:</span> {formData.companyId}</p>
+                                    {clientId && <p><span className="font-semibold">Client ID:</span> {clientId}</p>}
+                                </div>
+                            </div>
+
+                            {companyData && (
+                                <div className="bg-gray-50 p-4 rounded mb-6">
+                                    <h3 className="font-bold mb-2">Company Information</h3>
+                                    <p><span className="font-semibold">Name:</span> {companyData.name}</p>
+                                    <p><span className="font-semibold">ID:</span> {companyData.id}</p>
+                                    {companyData.ach_widget_base_url && (
+                                        <p><span className="font-semibold">ACH Widget URL:</span> {companyData.ach_widget_base_url}</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {accessToken && (
+                                <div className="bg-green-50 border border-green-200 p-4 rounded mb-4">
+                                    <h3 className="font-bold mb-2 text-green-800">ACH Access Token Generated</h3>
+                                    <div className="bg-white p-3 rounded border">
+                                        <p className="font-mono text-sm break-all">{accessToken}</p>
+                                    </div>
+                                    <div className="mt-3 flex gap-2">
+                                        <button
+                                            onClick={handleRegenerateToken}
+                                            disabled={isGeneratingToken}
+                                            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded text-sm disabled:opacity-50"
+                                        >
+                                            {isGeneratingToken ? 'Regenerating...' : 'Regenerate Token'}
+                                        </button>
+                                        <button
+                                            onClick={() => navigator.clipboard.writeText(accessToken)}
+                                            className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-1 px-3 rounded text-sm"
+                                        >
+                                            Copy Token
+                                        </button>
+                                        {companyData && companyData.ach_widget_base_url && (
+                                            <button
+                                                onClick={handleOpenACHWidget}
+                                                className="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-sm"
+                                            >
+                                                Open ACH Widget
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {!accessToken && clientId && (
+                                <div className="bg-yellow-50 border border-yellow-200 p-4 rounded mb-4">
+                                    <h3 className="font-bold mb-2 text-yellow-800">Generate ACH Access Token</h3>
+                                    <p className="text-sm text-yellow-700 mb-3">
+                                        Use the button below to generate an ACH access token for client ID: {clientId}
+                                    </p>
+                                    <button
+                                        onClick={handleRegenerateToken}
+                                        disabled={isGeneratingToken}
+                                        className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50"
+                                    >
+                                        {isGeneratingToken ? 'Generating...' : 'Generate ACH Access Token'}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <h3 className="font-bold mb-2">Error</h3>
+                            <pre className="text-sm whitespace-pre-wrap">{error}</pre>
+                        </div>
+                    )}
+
+                    {successMessage && (
+                        <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <span className="block sm:inline">{successMessage}</span>
+                        </div>
+                    )}
+
+                    <div className="bg-blue-50 border border-blue-200 p-4 rounded">
+                        <h3 className="font-bold mb-2 text-blue-800">How to Use</h3>
+                        <ol className="list-decimal list-inside text-sm text-blue-700 space-y-1">
+                            <li>Enter your MyTime credentials and company information</li>
+                            <li>Click "Sign In & Setup ACH" to login and create a client record</li>
+                            <li>The system will automatically generate an ACH access token</li>
+                            <li>Use the generated access token for ACH-related operations</li>
+                            <li>You can regenerate the token at any time using the "Regenerate Token" button</li>
+                        </ol>
+                        <p className="text-xs text-blue-600 mt-3">
+                            URL Parameters: ?base_url=www.mytime.com&company_id=40426&email=user@example.com
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

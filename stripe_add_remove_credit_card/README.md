@@ -482,14 +482,14 @@ To test the application:
 
 The application supports the following URL parameters:
 
-- `domain`: The domain for the MyTime API (e.g., https://api.mytime.com)
+- `domain`: The domain for the MyTime API (e.g., https://www.mytime.com)
 - `company_id`: The ID of the company
 - `email`: The user's email address
 - `password`: The user's password
 - `amount`: The amount to authorize (in cents)
 - `callback_url`: The URL to redirect to after adding a card
 
-Example: `index.html?domain=https://api.mytime.com&company_id=12345&email=user@example.com&password=yourpassword`
+Example: `index.html?domain=https://www.mytime.com&company_id=12345&email=user@example.com&password=yourpassword`
 
 ## Best Practices
 
