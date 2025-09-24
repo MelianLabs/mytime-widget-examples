@@ -2,16 +2,6 @@
 
 This repository contains example applications demonstrating how to integrate with the [MyTime Public API](https://www.mytime.com/api/mkp/v1/docs). The API enables businesses and developers to implement appointment booking functionality directly into their websites or applications using MyTime.com's scheduling platform.
 
-## Purpose
-
-These examples showcase how to use the MyTime Public API to:
-- Allow customers to book appointments on MyTime.com
-- Integrate MyTime's scheduling capabilities into your own website
-- Access MyTime's marketplace functionality
-- Process payments and manage credit cards
-- Create users, clients, and leads
-- Purchase and manage gift cards
-
 ## API Documentation
 
 For detailed API documentation and endpoints, visit:
