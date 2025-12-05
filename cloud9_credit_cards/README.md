@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API and Cloud9 to manage credit cards. The application allows users to authenticate, add credit cards using Cloud9's secure iframe, view existing cards, and delete cards.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./cloud9_credit_cards.webm)
+![Demo](./cloud9_credit_cards.gif)
+
+[Download Full Video](./cloud9_credit_cards.webm)
 
 ## Overview
 

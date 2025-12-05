@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to create a package purchase flow. The application allows users to authenticate, browse available packages (bundles), add them to cart, and complete the purchase with a card ID.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./purchase_packages.webm)
+![Demo](./purchase_packages.gif)
+
+[Download Full Video](./purchase_packages.webm)
 
 ## Overview
 

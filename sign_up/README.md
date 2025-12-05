@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to create new user accounts. The application allows users to sign up for a MyTime account with basic information.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./sign_up.webm)
+![Demo](./sign_up.gif)
+
+[Download Full Video](./sign_up.webm)
 
 ## Overview
 

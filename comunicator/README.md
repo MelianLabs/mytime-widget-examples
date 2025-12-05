@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to access and manage client-staff communications. The application allows users to view, send, and manage messages across different company locations.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./communicator.webm)
+![Demo](./communicator.gif)
+
+[Download Full Video](./communicator.webm)
 
 ## Overview
 

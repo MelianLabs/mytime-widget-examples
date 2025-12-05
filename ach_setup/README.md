@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to set up ACH payment processing. The application allows users to authenticate, create client records, generate ACH access tokens, and automatically open the ACH widget for bank account setup.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./ach_widget.webm)
+![Demo](./ach_widget.gif)
+
+[Download Full Video](./ach_widget.webm)
 
 ## Overview
 

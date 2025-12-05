@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API and Stripe to process gift card purchases without saving the customer's credit card information. The application allows users to purchase gift cards as a guest with a one-time payment.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./purchase_gift_card_without_saving_credit_card.webm)
+![Demo](./purchase_gift_card_without_saving_credit_card.gif)
+
+[Download Full Video](./purchase_gift_card_without_saving_credit_card.webm)
 
 ## Overview
 

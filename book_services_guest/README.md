@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to create a guest service booking flow. The application allows users to select a company, browse services, check availability, add services to cart, authenticate as a guest, and complete a booking without requiring a full user account.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./book_service_as_guest.webm)
+![Demo](./book_service_as_guest.gif)
+
+[Download Full Video](./book_service_as_guest.webm)
 
 ## Overview
 

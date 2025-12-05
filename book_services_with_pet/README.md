@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to create a service booking flow for pet services. The application requires user authentication before booking to manage pet information.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./book_services_with_pet.webm)
+![Demo](./book_services_with_pet.gif)
+
+[Download Full Video](./book_services_with_pet.webm)
 
 ## Overview
 

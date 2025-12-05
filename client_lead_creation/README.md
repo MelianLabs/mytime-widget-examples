@@ -2,9 +2,11 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to create clients or leads. The application allows users to submit client/lead information to the MyTime system using the API.
 
-## Demo Video
+## Demo
 
-[Download Demo Video](./client_lead_creation.webm)
+![Demo](./client_lead_creation.gif)
+
+[Download Full Video](./client_lead_creation.webm)
 
 ## Overview
 
