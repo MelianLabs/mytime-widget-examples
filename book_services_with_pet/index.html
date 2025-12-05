@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Book Service with Pet</title>
     <!-- React and ReactDOM from CDN -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
     <!-- Babel for JSX -->
-    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
     <!-- Axios for API calls -->
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <!-- Tailwind CSS -->
@@ -31,8 +31,6 @@
             const [selectedVariation, setSelectedVariation] = React.useState(null);
             const [pets, setPets] = React.useState([]);
             const [selectedPet, setSelectedPet] = React.useState(null);
-            const [newPetData, setNewPetData] = React.useState({ name: '', breed: '', notes: '' });
-            const [showNewPetForm, setShowNewPetForm] = React.useState(false);
             const [availableDates, setAvailableDates] = React.useState([]);
             const [selectedDate, setSelectedDate] = React.useState(null);
             const [availableTimes, setAvailableTimes] = React.useState([]);
@@ -48,12 +46,16 @@
                 const params = new URLSearchParams(window.location.search);
                 const baseUrl = params.get('base_url');
                 const companyId = params.get('company_id');
+                const email = params.get('email');
                 
                 if (baseUrl && companyId) {
                     setFormData({
                         baseUrl,
                         companyId
                     });
+                }
+                if (email) {
+                    setLoginData(prev => ({ ...prev, email }));
                 }
             }, []);
 
@@ -78,18 +80,59 @@
                     console.log('Pets Response:', response.data);
                     const children = response.data.children || [];
                     
-                    // Extract pet names from custom fields or use ID as fallback
+                    // Find the pet name and breed custom field IDs from company data
+                    let petNameFieldId = null;
+                    let petBreedFieldId = null;
+                    if (companyData && companyData.custom_fields) {
+                        const petNameField = companyData.custom_fields.find(cf => 
+                            cf.uuid === 'pet_name' || (cf.is_label === true && cf.resource_type === 'MyClient::Child')
+                        );
+                        if (petNameField) {
+                            petNameFieldId = petNameField.id;
+                        }
+                        const petBreedField = companyData.custom_fields.find(cf => 
+                            cf.uuid === 'pet_breed' || (cf.is_secondary_label === true && cf.resource_type === 'MyClient::Child')
+                        );
+                        if (petBreedField) {
+                            petBreedFieldId = petBreedField.id;
+                        }
+                    }
+
+                    // Extract pet names and breeds from custom fields
                     const petsWithNames = children.map(pet => {
                         let petName = pet.child_name || pet.name || pet.first_name;
+                        let petBreed = null;
                         
                         // If no direct name, try to find it in custom_field_values
-                        if (!petName && pet.custom_field_values && Array.isArray(pet.custom_field_values)) {
-                            // Try to find a field that might contain the name
-                            const nameField = pet.custom_field_values.find(cf => 
-                                cf.value && typeof cf.value === 'string' && cf.value.length < 50 && cf.value.length > 0
-                            );
-                            if (nameField && !nameField.value.startsWith('data:')) {
-                                petName = nameField.value;
+                        if (pet.custom_field_values && Array.isArray(pet.custom_field_values)) {
+                            // Find the name field
+                            if (!petName && petNameFieldId) {
+                                const nameField = pet.custom_field_values.find(cf => 
+                                    cf.custom_field_id === petNameFieldId && cf.value && typeof cf.value === 'string'
+                                );
+                                if (nameField) {
+                                    petName = nameField.value;
+                                }
+                            }
+                            
+                            // Find the breed field
+                            if (petBreedFieldId) {
+                                const breedField = pet.custom_field_values.find(cf => 
+                                    cf.custom_field_id === petBreedFieldId && cf.value && typeof cf.value === 'string'
+                                );
+                                if (breedField) {
+                                    petBreed = breedField.value;
+                                }
+                            }
+                            
+                            // Fallback for name: find first string value that's not empty
+                            if (!petName) {
+                                const fallbackField = pet.custom_field_values.find(cf => 
+                                    cf.value && typeof cf.value === 'string' && cf.value.length > 0
+                                );
+                                if (fallbackField) {
+                                    petName = fallbackField.value;
+                                }
                             }
                         }
                         
@@ -98,60 +141,16 @@
                             petName = `Pet #${pet.id}`;
                         }
                         
-                        return { ...pet, displayName: petName };
+                        // Build display name with breed in parenthesis
+                        const displayName = petBreed ? `${petName} (${petBreed})` : petName;
+                        
+                        return { ...pet, displayName };
                     });
                     
                     setPets(petsWithNames);
                 } catch (err) {
                     console.error('Error fetching pets:', err);
                     setError('Error fetching pets. Please try again.');
-                }
-            };
-
-            const handleCreatePet = async (e) => {
-                e.preventDefault();
-                setError('');
-
-                if (!newPetData.name) {
-                    setError('Pet name is required');
-                    return;
-                }
-
-                try {
-                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
-                    const response = await axios.post(
-                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/children`,
-                        {
-                            company_id: parseInt(selectedLocation.company_id),
-                            child: {
-                                name: newPetData.name,
-                                breed: newPetData.breed,
-                                notes: newPetData.notes
-                            }
-                        },
-                        {
-                            headers: {
-                                'Authorization': userData.authentication_token
-                            }
-                        }
-                    );
-
-                    console.log('Create Pet Response:', response.data);
-                    const newPet = response.data.child;
-                    
-                    // Add displayName to the new pet
-                    const petWithDisplayName = {
-                        ...newPet,
-                        displayName: newPetData.name || `Pet #${newPet.id}`
-                    };
-                    
-                    setPets([...pets, petWithDisplayName]);
-                    setSelectedPet(petWithDisplayName);
-                    setShowNewPetForm(false);
-                    setNewPetData({ name: '', breed: '', notes: '' });
-                } catch (err) {
-                    setError('Error creating pet. Please try again.');
-                    console.error('API Error:', err);
                 }
             };
 
@@ -227,7 +226,8 @@
                         cart_id: cartData.id,
                         is_embedded: true,
                         no_pay: true,
-                        is_mobile_consumer_app: false
+                        is_mobile_consumer_app: false,
+                        child_id: selectedPet ? selectedPet.id : null
                     };
 
                     const purchaseResponse = await axios.post(
@@ -241,9 +241,41 @@
                     );
 
                     console.log('Purchase Response:', purchaseResponse.data);
+                    
+                    // Check for errors in the response
+                    if (purchaseResponse.data.errors && Object.keys(purchaseResponse.data.errors).length > 0) {
+                        const errors = purchaseResponse.data.errors;
+                        let errorMessages = [];
+                        Object.keys(errors).forEach(key => {
+                            if (Array.isArray(errors[key])) {
+                                errors[key].forEach(e => {
+                                    const message = e.type || e.message || e;
+                                    errorMessages.push(message.replace(/_/g, ' '));
+                                });
+                            }
+                        });
+                        setError(errorMessages.length > 0 ? errorMessages.join(', ') : 'Purchase failed');
+                        return;
+                    }
+                    
                     setPurchaseData(purchaseResponse.data.purchase);
                 } catch (err) {
-                    setError('Error completing purchase. Please try again.');
+                    // Handle 422 and other error responses
+                    if (err.response && err.response.data && err.response.data.errors) {
+                        const errors = err.response.data.errors;
+                        let errorMessages = [];
+                        Object.keys(errors).forEach(key => {
+                            if (Array.isArray(errors[key])) {
+                                errors[key].forEach(e => {
+                                    const message = e.type || e.message || e;
+                                    errorMessages.push(message.replace(/_/g, ' '));
+                                });
+                            }
+                        });
+                        setError(errorMessages.length > 0 ? errorMessages.join(', ') : 'Purchase failed');
+                    } else {
+                        setError('Error completing purchase. Please try again.');
+                    }
                     console.error('API Error:', err);
                 }
             };
@@ -277,7 +309,7 @@
                             is_existing_customer: isLoggedIn,
                             travel_to_customer: false,
                             has_specific_employee: false,
-                            child_id: selectedPet ? selectedPet.id.toString() : ''
+                            child_id: selectedPet ? selectedPet.id : null
                         }
                     );
 
@@ -607,66 +639,6 @@
                                                                             <p className="text-sm text-gray-500">Type: {selectedPet.type}</p>
                                                                         </div>
                                                                     )}
-                                                                </div>
-                                                            )}
-
-                                                            {!showNewPetForm && (
-                                                                <button
-                                                                    onClick={() => setShowNewPetForm(true)}
-                                                                    className="w-full bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600"
-                                                                >
-                                                                    + Add New Pet
-                                                                </button>
-                                                            )}
-
-                                                            {showNewPetForm && (
-                                                                <div className="bg-blue-50 p-4 rounded border border-blue-300 mb-4">
-                                                                    <h5 className="font-bold mb-3">Add New Pet</h5>
-                                                                    <form onSubmit={handleCreatePet} className="space-y-3">
-                                                                        <div>
-                                                                            <label className="block text-sm font-medium mb-1">Pet Name *</label>
-                                                                            <input
-                                                                                type="text"
-                                                                                value={newPetData.name}
-                                                                                onChange={(e) => setNewPetData(prev => ({ ...prev, name: e.target.value }))}
-                                                                                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                                                required
-                                                                            />
-                                                                        </div>
-                                                                        <div>
-                                                                            <label className="block text-sm font-medium mb-1">Breed</label>
-                                                                            <input
-                                                                                type="text"
-                                                                                value={newPetData.breed}
-                                                                                onChange={(e) => setNewPetData(prev => ({ ...prev, breed: e.target.value }))}
-                                                                                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                                            />
-                                                                        </div>
-                                                                        <div>
-                                                                            <label className="block text-sm font-medium mb-1">Notes</label>
-                                                                            <textarea
-                                                                                value={newPetData.notes}
-                                                                                onChange={(e) => setNewPetData(prev => ({ ...prev, notes: e.target.value }))}
-                                                                                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                                                rows="2"
-                                                                            />
-                                                                        </div>
-                                                                        <div className="flex gap-2">
-                                                                            <button
-                                                                                type="submit"
-                                                                                className="flex-1 bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600"
-                                                                            >
-                                                                                Create Pet
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => setShowNewPetForm(false)}
-                                                                                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded hover:bg-gray-400"
-                                                                            >
-                                                                                Cancel
-                                                                            </button>
-                                                                        </div>
-                                                                    </form>
                                                                 </div>
                                                             )}
 
