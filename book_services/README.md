@@ -2,6 +2,12 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to create a service booking flow. The application allows users to select a company, browse services, check availability, add services to cart, authenticate, and complete a booking.
 
+## Demo Video
+
+https://github.com/user-attachments/assets/booking_services.webm
+
+[Download Demo Video](./booking_services.webm) | [Demo with Card Payment](./book_service_with_card.webm)
+
 ## Overview
 
 The example application in `index.html` demonstrates a complete booking flow with the following steps:

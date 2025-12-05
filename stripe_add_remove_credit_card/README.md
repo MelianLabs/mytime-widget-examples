@@ -2,6 +2,10 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API and Stripe to manage credit cards. The application allows users to authenticate, add credit cards using Stripe Elements, view existing cards, and delete cards.
 
+## Demo Video
+
+[Download Demo Video](./stripe_add_remove_credit_card.webm)
+
 ## Overview
 
 The example application in `index.html` demonstrates a complete credit card management flow with the following features:

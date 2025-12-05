@@ -2,6 +2,10 @@
 
 This directory contains an example application demonstrating how to integrate with MyTime's Public API to create a membership purchase flow. The application allows users to authenticate, browse available memberships, add them to cart, and complete the purchase with a payment method token.
 
+## Demo Video
+
+[Download Demo Video](./purchase_memberships.webm)
+
 ## Overview
 
 The example application in `index.html` demonstrates a complete membership purchase flow with the following steps:
