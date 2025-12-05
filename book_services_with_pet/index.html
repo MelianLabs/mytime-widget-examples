@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Service with Pet</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [formData, setFormData] = React.useState({
+                baseUrl: '',
+                companyId: ''
+            });
+            const [companyData, setCompanyData] = React.useState(null);
+            const [locations, setLocations] = React.useState([]);
+            const [selectedLocation, setSelectedLocation] = React.useState(null);
+            const [employees, setEmployees] = React.useState([]);
+            const [services, setServices] = React.useState([]);
+            const [pricings, setPricings] = React.useState([]);
+            const [selectedVariation, setSelectedVariation] = React.useState(null);
+            const [pets, setPets] = React.useState([]);
+            const [selectedPet, setSelectedPet] = React.useState(null);
+            const [newPetData, setNewPetData] = React.useState({ name: '', breed: '', notes: '' });
+            const [showNewPetForm, setShowNewPetForm] = React.useState(false);
+            const [availableDates, setAvailableDates] = React.useState([]);
+            const [selectedDate, setSelectedDate] = React.useState(null);
+            const [availableTimes, setAvailableTimes] = React.useState([]);
+            const [selectedTime, setSelectedTime] = React.useState(null);
+            const [cartData, setCartData] = React.useState(null);
+            const [loginData, setLoginData] = React.useState({ email: '', password: '' });
+            const [userData, setUserData] = React.useState(null);
+            const [purchaseData, setPurchaseData] = React.useState(null);
+            const [error, setError] = React.useState('');
+            const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+
+            React.useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const baseUrl = params.get('base_url');
+                const companyId = params.get('company_id');
+                
+                if (baseUrl && companyId) {
+                    setFormData({
+                        baseUrl,
+                        companyId
+                    });
+                }
+            }, []);
+
+            const getUniquePricesForVariation = (variationId) => {
+                const variationPrices = pricings.filter(p => p.variation_id === variationId);
+                const uniquePrices = new Set(variationPrices.map(p => p.new_list_price));
+                return Array.from(uniquePrices);
+            };
+
+            const fetchPets = async (authToken, companyId) => {
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const response = await axios.get(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/children?company_id=${companyId}`,
+                        {
+                            headers: {
+                                'Authorization': authToken
+                            }
+                        }
+                    );
+
+                    console.log('Pets Response:', response.data);
+                    const children = response.data.children || [];
+                    
+                    // Extract pet names from custom fields or use ID as fallback
+                    const petsWithNames = children.map(pet => {
+                        let petName = pet.child_name || pet.name || pet.first_name;
+                        
+                        // If no direct name, try to find it in custom_field_values
+                        if (!petName && pet.custom_field_values && Array.isArray(pet.custom_field_values)) {
+                            // Try to find a field that might contain the name
+                            const nameField = pet.custom_field_values.find(cf => 
+                                cf.value && typeof cf.value === 'string' && cf.value.length < 50 && cf.value.length > 0
+                            );
+                            if (nameField && !nameField.value.startsWith('data:')) {
+                                petName = nameField.value;
+                            }
+                        }
+                        
+                        // Fallback to ID if still no name
+                        if (!petName) {
+                            petName = `Pet #${pet.id}`;
+                        }
+                        
+                        return { ...pet, displayName: petName };
+                    });
+                    
+                    setPets(petsWithNames);
+                } catch (err) {
+                    console.error('Error fetching pets:', err);
+                    setError('Error fetching pets. Please try again.');
+                }
+            };
+
+            const handleCreatePet = async (e) => {
+                e.preventDefault();
+                setError('');
+
+                if (!newPetData.name) {
+                    setError('Pet name is required');
+                    return;
+                }
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const response = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/children`,
+                        {
+                            company_id: parseInt(selectedLocation.company_id),
+                            child: {
+                                name: newPetData.name,
+                                breed: newPetData.breed,
+                                notes: newPetData.notes
+                            }
+                        },
+                        {
+                            headers: {
+                                'Authorization': userData.authentication_token
+                            }
+                        }
+                    );
+
+                    console.log('Create Pet Response:', response.data);
+                    const newPet = response.data.child;
+                    
+                    // Add displayName to the new pet
+                    const petWithDisplayName = {
+                        ...newPet,
+                        displayName: newPetData.name || `Pet #${newPet.id}`
+                    };
+                    
+                    setPets([...pets, petWithDisplayName]);
+                    setSelectedPet(petWithDisplayName);
+                    setShowNewPetForm(false);
+                    setNewPetData({ name: '', breed: '', notes: '' });
+                } catch (err) {
+                    setError('Error creating pet. Please try again.');
+                    console.error('API Error:', err);
+                }
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setError('');
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    
+                    // Create session
+                    const sessionResponse = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/sessions`,
+                        {
+                            email: loginData.email,
+                            password: loginData.password,
+                            company_id: parseInt(formData.companyId),
+                            recaptcha_token: null
+                        }
+                    );
+
+                    console.log('Session Response:', sessionResponse.data);
+                    const user = sessionResponse.data.user;
+                    setUserData(user);
+                    setIsLoggedIn(true);
+
+                    // Update client preferences
+                    await axios.put(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/user/client`,
+                        {
+                            company_id: parseInt(formData.companyId),
+                            client: {
+                                preferred_language: 'en-US'
+                            }
+                        },
+                        {
+                            headers: {
+                                'Authorization': user.authentication_token
+                            }
+                        }
+                    );
+
+                } catch (err) {
+                    setError('Login failed. Please check your credentials and try again.');
+                    console.error('API Error:', err);
+                }
+            };
+
+            const handleCompletePurchase = async () => {
+                setError('');
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+
+                    // Update cart with user ID
+                    const cartUpdateResponse = await axios.put(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/carts/${cartData.id}`,
+                        { user_id: userData.id },
+                        {
+                            headers: {
+                                'Authorization': userData.authentication_token
+                            }
+                        }
+                    );
+
+                    console.log('Cart Update Response:', cartUpdateResponse.data);
+                    setCartData(cartUpdateResponse.data.cart);
+
+                    // Create purchase
+                    const purchasePayload = {
+                        note: '',
+                        referrer: 'express_checkout',
+                        cart_id: cartData.id,
+                        is_embedded: true,
+                        no_pay: true,
+                        is_mobile_consumer_app: false
+                    };
+
+                    const purchaseResponse = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/purchases`,
+                        purchasePayload,
+                        {
+                            headers: {
+                                'Authorization': userData.authentication_token
+                            }
+                        }
+                    );
+
+                    console.log('Purchase Response:', purchaseResponse.data);
+                    setPurchaseData(purchaseResponse.data.purchase);
+                } catch (err) {
+                    setError('Error completing purchase. Please try again.');
+                    console.error('API Error:', err);
+                }
+            };
+
+            const handleTimeSelect = async (time) => {
+                setSelectedTime(time);
+                setError('');
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    
+                    // Create cart
+                    const cartResponse = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/carts`,
+                        { user_id: userData ? userData.id : null }
+                    );
+                    
+                    console.log('Cart Response:', cartResponse.data);
+                    const cartId = cartResponse.data.cart.id;
+
+                    // Add item to cart with pet/child ID
+                    const cartItemResponse = await axios.post(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/carts/${cartId}/cart_items`,
+                        {
+                            location_id: selectedLocation.id,
+                            variation_ids: selectedVariation.id.toString(),
+                            deal_id: time.deal_id,
+                            employee_ids: '',
+                            begin_at: time.begin_at,
+                            end_at: time.end_at,
+                            is_existing_customer: isLoggedIn,
+                            travel_to_customer: false,
+                            has_specific_employee: false,
+                            child_id: selectedPet ? selectedPet.id.toString() : ''
+                        }
+                    );
+
+                    console.log('Cart Item Response:', cartItemResponse.data);
+                    setCartData(cartItemResponse.data.cart);
+                } catch (err) {
+                    setError('Error adding time slot to cart. Please try again.');
+                    console.error('API Error:', err);
+                }
+            };
+
+            const handleDateSelect = async (date) => {
+                setSelectedDate(date);
+                setAvailableTimes([]);
+                setError('');
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const childIdParam = selectedPet ? selectedPet.id : '';
+                    const response = await axios.get(
+                        `${baseUrlWithoutTrailingSlash}/api/mkp/v1/open_times?date=${date}&location_id=${selectedLocation.id}&employee_ids=&variation_ids=${selectedVariation.id}&is_existing_customer=${isLoggedIn}&include_tax=false&include_fulfillments=false&child_id=${childIdParam}`
+                    );
+
+                    console.log('Available Times Response:', response.data);
+                    setAvailableTimes(response.data.open_times || []);
+                } catch (err) {
+                    setError('Error fetching available times. Please try again.');
+                    console.error('API Error:', err);
+                }
+            };
+
+            const handlePetSelect = async (pet) => {
+                setSelectedPet(pet);
+                setAvailableDates([]);
+                setSelectedDate(null);
+                setAvailableTimes([]);
+                setError('');
+
+                if (selectedVariation) {
+                    try {
+                        const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                        const childIdParam = pet ? pet.id : 'new';
+                        const response = await axios.get(
+                            `${baseUrlWithoutTrailingSlash}/api/mkp/v1/open_dates?location_id=${selectedLocation.id}&employee_ids=&variation_ids=${selectedVariation.id}&is_existing_customer=${isLoggedIn}&child_id=${childIdParam}`
+                        );
+
+                        console.log('Available Dates Response:', response.data);
+                        setAvailableDates(response.data.open_dates || []);
+                    } catch (err) {
+                        setError('Error fetching available dates. Please try again.');
+                        console.error('API Error:', err);
+                    }
+                }
+            };
+
+            const handleVariationSelect = (variation) => {
+                setSelectedVariation(variation);
+                setSelectedPet(null);
+                setAvailableDates([]);
+                setSelectedDate(null);
+                setAvailableTimes([]);
+            };
+
+            const handleLocationSelect = async (location) => {
+                setSelectedLocation(location);
+                setEmployees([]);
+                setServices([]);
+                setPricings([]);
+                setError('');
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    const [employeesResponse, servicesResponse, pricingsResponse] = await Promise.all([
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${location.company_id}/employees?location_ids=${location.id}`),
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${location.company_id}/deals?location_ids=${location.id}&variation_setting=true`),
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${location.company_id}/pricings?location_ids=${location.id}`)
+                    ]);
+
+                    console.log('Employees Response:', employeesResponse.data);
+                    console.log('Services Response:', servicesResponse.data);
+                    console.log('Pricings Response:', pricingsResponse.data);
+
+                    setEmployees(employeesResponse.data.employees || []);
+                    setServices(servicesResponse.data.deals || []);
+                    setPricings(pricingsResponse.data.pricings || []);
+
+                    // Fetch pets if user is logged in
+                    if (isLoggedIn && userData && userData.authentication_token) {
+                        await fetchPets(userData.authentication_token, location.company_id);
+                    }
+                } catch (err) {
+                    setError('Error fetching location data. Please try again.');
+                    console.error('API Error:', err);
+                }
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+                setCompanyData(null);
+                setLocations([]);
+
+                try {
+                    const baseUrlWithoutTrailingSlash = formData.baseUrl.replace(/\/$/, '');
+                    console.log('Making API calls to:', baseUrlWithoutTrailingSlash);
+                    
+                    const [companyResponse, locationsResponse] = await Promise.all([
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}?include_external_locations=false&include_gc_templates=false&include_env_fees=false&include_parent_settings=false&include_scripts=false&include_subscription=false&include_custom_fields=true&include_intake_forms=true&blocked=true`),
+                        axios.get(`${baseUrlWithoutTrailingSlash}/api/mkp/v1/companies/${formData.companyId}/locations?include_business_hours=true&include_mobility=true`)
+                    ]);
+
+                    console.log('Company Response:', companyResponse.data);
+                    console.log('Locations Response:', locationsResponse.data);
+
+                    if (companyResponse.data && companyResponse.data.company) {
+                        setCompanyData(companyResponse.data.company);
+                    } else {
+                        console.error('Invalid company response structure:', companyResponse.data);
+                        setError('Invalid company data structure received');
+                    }
+
+                    if (locationsResponse.data && Array.isArray(locationsResponse.data.locations)) {
+                        setLocations(locationsResponse.data.locations);
+                    } else {
+                        console.error('Invalid locations response structure:', locationsResponse.data);
+                        setError('Invalid locations data structure received');
+                    }
+                } catch (err) {
+                    setError('Error fetching data. Please check your inputs and try again.');
+                    console.error('API Error:', err);
+                }
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto">
+                    <div className="bg-blue-50 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-4">
+                        <p className="font-bold">Pet Booking Flow</p>
+                        <p className="text-sm">This flow requires login before booking to manage pet information.</p>
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="baseUrl">
+                                Base URL
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="baseUrl"
+                                type="text"
+                                value={formData.baseUrl}
+                                onChange={(e) => setFormData(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                placeholder="www.mytime.com"
+                            />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyId">
+                                Company ID
+                            </label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="companyId"
+                                type="text"
+                                value={formData.companyId}
+                                onChange={(e) => setFormData(prev => ({ ...prev, companyId: e.target.value }))}
+                                placeholder="40426"
+                            />
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <button
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                type="submit">
+                                Submit
+                            </button>
+                        </div>
+                    </form>
+
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                            <span className="block sm:inline">{error}</span>
+                        </div>
+                    )}
+
+                    {companyData && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Company Information</h2>
+                            <p><span className="font-bold">ID:</span> {companyData.id}</p>
+                            <p><span className="font-bold">Name:</span> {companyData.name}</p>
+                        </div>
+                    )}
+
+                    {locations.length > 0 && !isLoggedIn && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Login Required</h2>
+                            <p className="mb-4 text-gray-600">Please log in to view locations and book services for your pet.</p>
+                            <form onSubmit={handleLogin} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                    <input
+                                        type="email"
+                                        value={loginData.email}
+                                        onChange={(e) => setLoginData(prev => ({ ...prev, email: e.target.value }))}
+                                        className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                    <input
+                                        type="password"
+                                        value={loginData.password}
+                                        onChange={(e) => setLoginData(prev => ({ ...prev, password: e.target.value }))}
+                                        className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        required
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    Log In
+                                </button>
+                            </form>
+                        </div>
+                    )}
+
+                    {isLoggedIn && locations.length > 0 && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Locations</h2>
+                            <div className="space-y-4">
+                                {locations.map(location => (
+                                    <div key={location.id} className="border-b pb-4">
+                                        <p><span className="font-bold">ID:</span> {location.id}</p>
+                                        <p><span className="font-bold">Nickname:</span> {location.nickname}</p>
+                                        <p><span className="font-bold">Address:</span> {location.street_address}</p>
+                                        <p><span className="font-bold">City:</span> {location.city}</p>
+                                        <p><span className="font-bold">State:</span> {location.state}</p>
+                                        <p><span className="font-bold">Country:</span> {location.country}</p>
+                                        <button
+                                            onClick={() => handleLocationSelect(location)}
+                                            className={`mt-4 px-4 py-2 rounded font-bold ${selectedLocation && selectedLocation.id === location.id ? 'bg-green-500 text-white' : 'bg-blue-500 hover:bg-blue-700 text-white'}`}
+                                        >
+                                            {selectedLocation && selectedLocation.id === location.id ? 'Selected' : 'Select Location'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedLocation && employees.length > 0 && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            <h2 className="text-xl font-bold mb-4">Employees</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {employees.map(employee => (
+                                    <div key={employee.id} className="border p-4 rounded">
+                                        <p><span className="font-bold">ID:</span> {employee.id}</p>
+                                        <p><span className="font-bold">Name:</span> {employee.name} {employee.last_name}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedLocation && services.length > 0 && (
+                        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 w-full">
+                            <h2 className="text-xl font-bold mb-4">Services</h2>
+                            <div className="space-y-6 w-full">
+                                {services.map(deal => (
+                                    <div key={deal.id} className="border rounded-lg p-4 w-full">
+                                        <h3 className="text-lg font-bold mb-3">{deal.service.name}</h3>
+                                        <div className="grid grid-cols-1 gap-4 w-full">
+                                            {deal.variations.map(variation => (
+                                                <div key={variation.id} className="bg-gray-50 rounded p-6 w-full">
+                                                    <p><span className="font-bold">Name:</span> {variation.name}</p>
+                                                    <p><span className="font-bold">Duration:</span> {variation.duration} minutes</p>
+                                                    {variation.description && (
+                                                        <p><span className="font-bold">Description:</span> {variation.description}</p>
+                                                    )}
+                                                    <p><span className="font-bold">Add-on:</span> {variation.add_on ? 'Yes' : 'No'}</p>
+                                                    {variation.price_varies ? (
+                                                        <p><span className="font-bold">Price:</span> Varies</p>
+                                                    ) : (
+                                                        <div className="mt-2">
+                                                            <p className="font-bold mb-1">Prices:</p>
+                                                            <div className="space-y-1">
+                                                                {getUniquePricesForVariation(variation.id).map((price, index) => (
+                                                                    <p key={index} className="text-sm">${price}</p>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleVariationSelect(variation)}
+                                                        className={`mt-4 w-full px-4 py-2 rounded font-bold ${selectedVariation && selectedVariation.id === variation.id ? 'bg-green-500 text-white' : 'bg-blue-500 hover:bg-blue-700 text-white'}`}
+                                                    >
+                                                        {selectedVariation && selectedVariation.id === variation.id ? 'Selected' : 'Select Service'}
+                                                    </button>
+
+                                                    {selectedVariation && selectedVariation.id === variation.id && (
+                                                        <div className="mt-4">
+                                                            <h4 className="font-bold mb-2">Select Your Pet:</h4>
+                                                            
+                                                            {pets.length > 0 && (
+                                                                <div className="mb-4">
+                                                                    <select
+                                                                        value={selectedPet ? selectedPet.id : ''}
+                                                                        onChange={(e) => {
+                                                                            const petId = parseInt(e.target.value);
+                                                                            const pet = pets.find(p => p.id === petId);
+                                                                            if (pet) {
+                                                                                handlePetSelect(pet);
+                                                                            }
+                                                                        }}
+                                                                        className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                                                                    >
+                                                                        <option value="">-- Select a pet --</option>
+                                                                        {pets.map(pet => (
+                                                                            <option key={pet.id} value={pet.id}>
+                                                                                {pet.displayName}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                    {selectedPet && (
+                                                                        <div className="mt-2 p-3 bg-green-50 rounded border border-green-300">
+                                                                            <p className="font-bold text-green-700">{selectedPet.displayName}</p>
+                                                                            <p className="text-sm text-gray-600">Pet ID: {selectedPet.id}</p>
+                                                                            <p className="text-sm text-gray-500">Type: {selectedPet.type}</p>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            {!showNewPetForm && (
+                                                                <button
+                                                                    onClick={() => setShowNewPetForm(true)}
+                                                                    className="w-full bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600"
+                                                                >
+                                                                    + Add New Pet
+                                                                </button>
+                                                            )}
+
+                                                            {showNewPetForm && (
+                                                                <div className="bg-blue-50 p-4 rounded border border-blue-300 mb-4">
+                                                                    <h5 className="font-bold mb-3">Add New Pet</h5>
+                                                                    <form onSubmit={handleCreatePet} className="space-y-3">
+                                                                        <div>
+                                                                            <label className="block text-sm font-medium mb-1">Pet Name *</label>
+                                                                            <input
+                                                                                type="text"
+                                                                                value={newPetData.name}
+                                                                                onChange={(e) => setNewPetData(prev => ({ ...prev, name: e.target.value }))}
+                                                                                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                                                required
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-sm font-medium mb-1">Breed</label>
+                                                                            <input
+                                                                                type="text"
+                                                                                value={newPetData.breed}
+                                                                                onChange={(e) => setNewPetData(prev => ({ ...prev, breed: e.target.value }))}
+                                                                                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-sm font-medium mb-1">Notes</label>
+                                                                            <textarea
+                                                                                value={newPetData.notes}
+                                                                                onChange={(e) => setNewPetData(prev => ({ ...prev, notes: e.target.value }))}
+                                                                                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                                                rows="2"
+                                                                            />
+                                                                        </div>
+                                                                        <div className="flex gap-2">
+                                                                            <button
+                                                                                type="submit"
+                                                                                className="flex-1 bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600"
+                                                                            >
+                                                                                Create Pet
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => setShowNewPetForm(false)}
+                                                                                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded hover:bg-gray-400"
+                                                                            >
+                                                                                Cancel
+                                                                            </button>
+                                                                        </div>
+                                                                    </form>
+                                                                </div>
+                                                            )}
+
+                                                            {selectedPet && availableDates.length > 0 && (
+                                                                <div className="mt-4">
+                                                                    <h4 className="font-bold mb-2">Available Dates for {selectedPet.displayName}:</h4>
+                                                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                                                                        {availableDates.map((date, index) => (
+                                                                            <button
+                                                                                key={index}
+                                                                                onClick={() => handleDateSelect(date.date)}
+                                                                                className={`text-sm p-2 rounded border text-left ${selectedDate === date.date ? 'bg-green-100 border-green-500' : 'bg-white hover:bg-gray-50'}`}
+                                                                            >
+                                                                                {new Date(date.date).toLocaleDateString()}
+                                                                                {date.on_sale && <span className="ml-1 text-red-500">(On Sale)</span>}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {selectedDate && availableTimes.length > 0 && (
+                                                                <div className="mt-4">
+                                                                    <h4 className="font-bold mb-2">Available Times:</h4>
+                                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-60 overflow-y-auto">
+                                                                        {availableTimes.map((time, index) => {
+                                                                            const beginTime = new Date(time.begin_at);
+                                                                            const endTime = new Date(time.end_at);
+                                                                            const timeString = `${beginTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                                                                            
+                                                                            return (
+                                                                                <button
+                                                                                    key={index}
+                                                                                    onClick={() => handleTimeSelect(time)}
+                                                                                    className={`text-sm p-2 bg-white rounded border w-full text-left ${selectedTime && selectedTime.begin_at === time.begin_at ? 'bg-green-100 border-green-500' : 'hover:bg-gray-50'}`}
+                                                                                >
+                                                                                    <div>{timeString}</div>
+                                                                                    <div className="text-gray-600">${time.list_price}</div>
+                                                                                    {time.promoting && <span className="text-red-500 text-xs">On Sale!</span>}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {cartData && cartData.items && cartData.items.length > 0 && !purchaseData && (
+                                                                <div className="mt-6">
+                                                                    <div className="p-4 bg-green-50 rounded border border-green-500 mb-4">
+                                                                        <h4 className="font-bold text-green-700 mb-2">Added to Cart!</h4>
+                                                                        <div className="text-sm text-green-600">
+                                                                            <p>Service for {selectedPet.displayName} has been added to your cart.</p>
+                                                                            <p className="mt-1">Total Price: ${cartData.items[0].slot_variations[0].price}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={handleCompletePurchase}
+                                                                        className="w-full bg-blue-500 text-white py-3 px-4 rounded hover:bg-blue-600 font-bold"
+                                                                    >
+                                                                        Complete Booking
+                                                                    </button>
+                                                                </div>
+                                                            )}
+
+                                                            {purchaseData && (
+                                                                <div className="mt-6 p-4 bg-green-50 rounded border border-green-500">
+                                                                    <h4 className="font-bold text-green-700 mb-2">Booking Confirmed!</h4>
+                                                                    <div className="text-sm text-green-600 space-y-2">
+                                                                        <p>Your appointment for {selectedPet.displayName} has been confirmed.</p>
+                                                                        <div className="mt-2 p-3 bg-white rounded">
+                                                                            <p className="font-medium">Appointment Details:</p>
+                                                                            <p>Pet: {selectedPet.displayName}</p>
+                                                                            <p>Date: {new Date(purchaseData.slots[0].begin_at).toLocaleDateString()}</p>
+                                                                            <p>Time: {new Date(purchaseData.slots[0].begin_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - {new Date(purchaseData.slots[0].end_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                                                            <p>Provider: {purchaseData.slots[0].employee_name}</p>
+                                                                            <p>Total Price: ${purchaseData.total_price}</p>
+                                                                            <p className="mt-2 text-xs">Confirmation #: {purchaseData.voucher_id}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
