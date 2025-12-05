@@ -26,43 +26,49 @@ Each example includes its own detailed README.md with step-by-step instructions 
    - Similar to the standard booking flow but uses guest authentication
    - Optional employee selection
 
-3. [**Client/Lead Creation**](./client_lead_creation/README.md) - Create clients or leads through the API
+3. [**Book Services with Pet**](./book_services_with_pet/README.md) - Pet service booking flow
+   - Requires user authentication before booking
+   - Pet selection from user's account
+   - Includes `child_id` in cart items and purchases
+   - Dynamic pet name/breed display from custom fields
+
+4. [**Client/Lead Creation**](./client_lead_creation/README.md) - Create clients or leads through the API
    - Client type selection (Client or Lead)
    - Comprehensive error handling
 
-4. [**Sign Up**](./sign_up/README.md) - User registration flow
+5. [**Sign Up**](./sign_up/README.md) - User registration flow
    - Form fields for user information
    - Success state showing user details
 
-5. [**Purchase Memberships**](./purchase_memberships/README.md) - Purchase memberships through the API
+6. [**Purchase Memberships**](./purchase_memberships/README.md) - Purchase memberships through the API
    - Browse and select memberships by location
    - Complete purchases with payment method tokens
    - View purchase confirmation and details
 
-6. [**Stripe Add/Remove Credit Card**](./stripe_add_remove_credit_card/README.md) - Manage credit cards with Stripe
+7. [**Stripe Add/Remove Credit Card**](./stripe_add_remove_credit_card/README.md) - Manage credit cards with Stripe
    - Secure credit card entry with Stripe Elements
    - View and delete existing cards
 
-6. [**Gift Card Without Saving Credit Card**](./gift_card_without_saving_credit_card/README.md) - Gift card purchases with Stripe
+8. [**Gift Card Without Saving Credit Card**](./gift_card_without_saving_credit_card/README.md) - Gift card purchases with Stripe
    - One-time payment processing
    - Email-based gift card delivery
 
-7. [**Cloud9 Credit Cards**](./cloud9_credit_cards/README.md) - Credit card management with Cloud9
+9. [**Cloud9 Credit Cards**](./cloud9_credit_cards/README.md) - Credit card management with Cloud9
    - Cloud9 iframe integration for secure credit card entry
    - Add and remove credit cards
 
-8. [**Purchase Packages**](./purchase_packages/README.md) - Complete package purchase flow with authentication
+10. [**Purchase Packages**](./purchase_packages/README.md) - Complete package purchase flow with authentication
    - User login and client record creation
    - Browse and select packages (bundles)
    - Add packages to cart and complete purchase with card ID
 
-9. [**Communicator**](./comunicator/README.md) - Client-staff messaging interface
+11. [**Communicator**](./comunicator/README.md) - Client-staff messaging interface
    - View and send messages across company locations
    - Infinite scrolling for message history
    - Real-time message updates with automatic polling
    - Mark messages as read automatically
 
-10. [**ACH Setup**](./ach_setup/README.md) - ACH payment setup integration
+12. [**ACH Setup**](./ach_setup/README.md) - ACH payment setup integration
     - User authentication and client record creation
     - ACH access token generation
     - Automatic ACH widget opening with company configuration
