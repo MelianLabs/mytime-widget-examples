@@ -310,6 +310,7 @@ const handleGiftCardSubmit = async (e) => {
             {
                 params: {
                     company_id: formData.companyId,
+                    location_id: selectedLocation.id,
                     callback_url: callbackUrl,
                     payment_type: 'card',
                     add_to_client: false,
@@ -460,6 +461,12 @@ The integration flow works as follows:
 3. Get a payment session with client secret from the MyTime API
 4. Use Stripe's confirmPayment method to process the payment
 5. Complete the gift card purchase with the payment intent
+
+### Multi-location companies (connected accounts)
+
+For companies whose locations each have their own connected Stripe account, the `PaymentIntent` must be created on the **same** connected account that the Payment Element is initialized with (`onBehalfOf`). The MyTime API selects that account from the **`location_id`** you pass to `/api/mkp/v1/user/payment_methods/session` — it derives the account from the location and falls back to the company's default account when `location_id` is omitted.
+
+Always pass `location_id` for the selected location on the session request. If you omit it, the `PaymentIntent` is created on the company's default location's account; when the customer selected a different location, Stripe rejects `confirmPayment` with an `on_behalf_of` mismatch (HTTP 422), because the Payment Element's `onBehalfOf` no longer matches the `PaymentIntent`'s account.
 
 ## Testing the Application
 
