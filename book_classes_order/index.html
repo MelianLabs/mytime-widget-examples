@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Classes (one order for the whole family)</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Stripe.js -->
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        // ---------------------------------------------------------------------------------------------
+        // Configuration. Every value can also be passed as a URL parameter:
+        //   index.html?base_url=http://localhost:3000&company_id=754&location_id=1557&email=...&password=...
+        // ---------------------------------------------------------------------------------------------
+        const params = new URLSearchParams(window.location.search);
+        const CONFIG = {
+            baseUrl: (params.get('base_url') || 'http://localhost:3000').replace(/\/$/, ''),
+            companyId: params.get('company_id') || '',
+            locationId: params.get('location_id') || '',
+            // Name of the membership template that is the one-time registration fee.
+            registrationFeeName: params.get('fee_name') || 'Registration Fee',
+            // How many days of upcoming sessions to offer.
+            daysAhead: parseInt(params.get('days_ahead') || '45', 10),
+        };
+
+        const api = (path) => `${CONFIG.baseUrl}/api/mkp/v1${path}`;
+        const money = (value) => `$${Number(value || 0).toFixed(2)}`;
+
+        // Error codes the Orders and intake APIs return, in words a parent understands.
+        const ERROR_TEXT = {
+            session_full: 'This class is full.',
+            members_only: 'This class is for registered campers: add the Registration Fee for this child.',
+            already_enrolled: 'This child is already enrolled in this class.',
+            duplicate_seat: 'This child is twice in the same class.',
+            session_registration_closed: 'Registration for this class is closed.',
+            session_unavailable: 'This class can no longer be booked online.',
+            child_not_on_account: 'This child is not on your account.',
+            membership_not_available: 'The registration fee is not available at this location.',
+            order_expired: 'Your order expired before it was paid. Nothing was charged. Please start a new order.',
+            order_close_failed: 'The order could not be completed. Nothing was booked.',
+            order_close_failed_refunded: 'Your card was charged but the booking could not be completed, so the payment was refunded automatically. Nothing was booked.',
+            order_close_failed_refund_failed: 'Your card was charged but the booking could not be completed. The refund did not go through automatically; the business has been alerted and will refund you.',
+            order_already_charged: 'A payment is already recorded on this order. Please do not pay again; contact the business.',
+            order_not_supported: 'Pay this order with the Pay button.',
+            order_not_pending: 'This order is no longer open.',
+            order_must_be_paid_in_full: 'An order must be paid in full.',
+            ticket_void: 'This order was cancelled or expired.',
+            not_found: 'Online class orders are not available for this business.',
+            orders_api_disabled: 'Online class orders are switched off right now. Please try again later.',
+        };
+
+        // Turns {errors: {"lines[0]": [{type: "session_full"}], general: [...]}} into readable lines.
+        const describeErrors = (err, labelFor) => {
+            const data = err && err.response && err.response.data;
+            if (!data || !data.errors) return [err && err.message ? err.message : 'Something went wrong.'];
+            const lines = [];
+            Object.keys(data.errors).forEach((key) => {
+                const list = Array.isArray(data.errors[key]) ? data.errors[key] : [data.errors[key]];
+                list.forEach((item) => {
+                    const type = item && item.type;
+                    let text;
+                    if (typeof type === 'string') text = ERROR_TEXT[type] || type;
+                    else if (type && type.code) text = (ERROR_TEXT[type.code] || type.code) + (type.name ? ` (${type.name})` : '');
+                    else if (type && type.name) text = type.name;
+                    if (item && item.general) text = [].concat(item.general).join(' ');
+                    if (item && item.message) text = `${text || ''} ${item.message}`.trim();
+                    const label = labelFor ? labelFor(key) : null;
+                    lines.push(label ? `${label}: ${text}` : text);
+                });
+            });
+            return lines;
+        };
+
+        // Class times are shown in the location's time zone (set after sign-in), not the browser's.
+        let LOCATION_TIME_ZONE;
+        const lineName = (item) => (item.child_name && item.name.indexOf(item.child_name) === -1 ? `${item.name} – ${item.child_name}` : item.name);
+
+        const formatWhen = (iso) => new Date(iso).toLocaleString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: LOCATION_TIME_ZONE,
+        });
+
+        // An order whose seats are no longer held: 401 access_token expired (the payment token expires with the order),
+        // order_expired, or ticket_void after the expiry sweep voided it.
+        const isExpiredOrder = (err) => {
+            const data = err && err.response && err.response.data;
+            const errors = (data && data.errors) || {};
+            const types = [].concat(errors.access_token || [], errors.general || [], errors.status || []).map((e) => e && e.type);
+            return (err.response && err.response.status === 401 && types.indexOf('expired') !== -1) ||
+                types.indexOf('order_expired') !== -1 || types.indexOf('ticket_void') !== -1;
+        };
+
+        function ErrorBox({ lines }) {
+            if (!lines || lines.length === 0) return null;
+            return (
+                <div data-test="error" className="bg-red-50 border border-red-300 text-red-800 rounded p-3 mb-4">
+                    {lines.map((line, i) => <div key={i}>{line}</div>)}
+                </div>
+            );
+        }
+
+        function Step({ number, title, children }) {
+            return (
+                <div className="bg-white rounded-lg shadow p-5 mb-5">
+                    <h2 className="text-lg font-semibold mb-3">{number}. {title}</h2>
+                    {children}
+                </div>
+            );
+        }
+
+        // Stripe card entry: creates a PaymentMethod in the browser and saves it on the client's wallet
+        // through POST /intake/payment_methods. Card numbers never reach your server or MyTime's.
+        function AddCard({ stripeKey, onSave, disabled }) {
+            const mountRef = React.useRef(null);
+            const [stripe, setStripe] = React.useState(null);
+            const [card, setCard] = React.useState(null);
+            const [busy, setBusy] = React.useState(false);
+            const [error, setError] = React.useState('');
+
+            React.useEffect(() => {
+                if (!stripeKey || !mountRef.current) return undefined;
+                const instance = Stripe(stripeKey);
+                const element = instance.elements().create('card', { hidePostalCode: true });
+                element.mount(mountRef.current);
+                setStripe(instance);
+                setCard(element);
+                return () => element.destroy();
+            }, [stripeKey]);
+
+            const save = async () => {
+                setError('');
+                setBusy(true);
+                try {
+                    const result = await stripe.createPaymentMethod({ type: 'card', card });
+                    if (result.error) throw new Error(result.error.message);
+                    await onSave(result.paymentMethod.id);
+                    card.clear();
+                } catch (err) {
+                    const data = err.response && err.response.data;
+                    setError(data && data.error ? data.error : err.message);
+                } finally {
+                    setBusy(false);
+                }
+            };
+
+            return (
+                <div className="border rounded p-3 mt-3">
+                    <div className="text-sm text-gray-600 mb-2">Add a card (test mode: 4242 4242 4242 4242, any future date, any CVC)</div>
+                    <div ref={mountRef} data-test="card-element" className="border rounded p-3 bg-white"></div>
+                    {error && <div data-test="card-error" className="text-red-700 text-sm mt-2">{error}</div>}
+                    <button data-test="save-card" onClick={save} disabled={disabled || busy || !stripe}
+                        className="mt-3 bg-gray-800 text-white px-4 py-2 rounded disabled:opacity-50">
+                        {busy ? 'Saving…' : 'Save card'}
+                    </button>
+                </div>
+            );
+        }
+
+        function App() {
+            const [login, setLogin] = React.useState({ email: params.get('email') || '', password: params.get('password') || '' });
+            const [user, setUser] = React.useState(null);           // { token, clientId, name }
+            const [company, setCompany] = React.useState(null);
+            const [children, setChildren] = React.useState([]);     // [{id, name, hasFee}]
+            const [sessions, setSessions] = React.useState([]);
+            const [feeTemplate, setFeeTemplate] = React.useState(null);
+            const [picked, setPicked] = React.useState({});         // childId -> { sessionKey: line }
+            const [order, setOrder] = React.useState(null);         // GET /orders/:id body
+            const [orderToken, setOrderToken] = React.useState(''); // access_token returned by POST /orders
+            const [promoCode, setPromoCode] = React.useState('');
+            const [appliedCodes, setAppliedCodes] = React.useState([]);
+            const [cards, setCards] = React.useState([]);
+            const [cardId, setCardId] = React.useState('');
+            const [paid, setPaid] = React.useState(null);
+            const [errors, setErrors] = React.useState([]);
+            const [busy, setBusy] = React.useState('');
+            const [now, setNow] = React.useState(Date.now());
+            const [expired, setExpired] = React.useState(false);
+
+            React.useEffect(() => {
+                const timer = setInterval(() => setNow(Date.now()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            const userHeaders = () => ({ headers: { Accept: 'application/json', Authorization: user.token } });
+            // Intake (payment) calls authenticate with the order's access_token, not the user token.
+            const orderHeaders = (token) => ({ headers: { Accept: 'application/json', Authorization: `Bearer ${token || orderToken}` } });
+
+            const run = async (label, fn, labelFor) => {
+                setErrors([]);
+                setBusy(label);
+                try {
+                    return await fn();
+                } catch (err) {
+                    console.error(label, err.response ? err.response.data : err);
+                    // The API's 401 "access_token expired" currently reaches browsers without CORS headers, so axios only
+                    // sees a network error. Re-read the order with the user token to tell an expired order apart.
+                    let orderGone = false;
+                    if (!err.response && order) {
+                        try {
+                            const fresh = (await axios.get(api(`/orders/${order.id}`), userHeaders())).data.order;
+                            orderGone = fresh.status !== 'open' || (fresh.expires_at && new Date(fresh.expires_at).getTime() <= Date.now()) ||
+                                fresh.items.some((item) => item.status === 'expired');
+                        } catch (ignored) {
+                            orderGone = false;
+                        }
+                    }
+                    if (isExpiredOrder(err) || orderGone) {
+                        setExpired(true);
+                        return null;
+                    }
+                    setErrors(describeErrors(err, labelFor));
+                    return null;
+                } finally {
+                    setBusy('');
+                }
+            };
+
+            // 1. Sign in, find the client record at this company, then load what the page needs.
+            const signIn = (e) => {
+                e.preventDefault();
+                run('signin', async () => {
+                    const session = await axios.post(api('/sessions'), {
+                        email: login.email, password: login.password, company_id: parseInt(CONFIG.companyId, 10),
+                    });
+                    const token = session.data.user.authentication_token;
+                    const auth = { headers: { Authorization: token } };
+                    const clientResponse = await axios.put(api('/user/client'),
+                        { company_id: parseInt(CONFIG.companyId, 10), client: { preferred_language: 'en-US' } }, auth);
+                    const today = new Date();
+                    const until = new Date(today.getTime() + CONFIG.daysAhead * 86400000);
+                    const iso = (d) => d.toISOString().split('T')[0];
+                    const [companyResponse, locationsResponse, childrenResponse, sessionsResponse, membershipsResponse, ownedResponse] = await Promise.all([
+                        axios.get(api(`/companies/${CONFIG.companyId}`)),
+                        axios.get(api(`/companies/${CONFIG.companyId}/locations`)),
+                        axios.get(api(`/user/children?company_id=${CONFIG.companyId}`), auth),
+                        axios.get(api(`/classes/sessions?company_id=${CONFIG.companyId}&location_id=${CONFIG.locationId}&start_date=${iso(today)}&end_date=${iso(until)}`), auth),
+                        axios.get(api(`/companies/${CONFIG.companyId}/memberships?location_id=${CONFIG.locationId}&only_clients=false`)),
+                        axios.get(api(`/user/client_memberships?company_id=${CONFIG.companyId}`), auth),
+                    ]);
+                    const fee = (membershipsResponse.data.memberships || []).find((m) => m.name === CONFIG.registrationFeeName) || null;
+                    const owned = (ownedResponse.data.client_memberships || []).filter((m) =>
+                        fee && m.membership_template_id === fee.id && ['active', 'pending_cancelation'].indexOf(m.status) !== -1);
+                    const kids = (childrenResponse.data.children || []).map((child) => {
+                        const label = (child.custom_field_values || []).find((v) => v.value);
+                        return {
+                            id: child.id,
+                            name: label ? label.value : `Child ${child.id}`,
+                            hasFee: owned.some((m) => m.my_client_child_id === child.id),
+                        };
+                    });
+                    const location = (locationsResponse.data.locations || []).find((l) => String(l.id) === String(CONFIG.locationId));
+                    LOCATION_TIME_ZONE = location && location.time_zone ? location.time_zone : undefined;
+                    setCompany(companyResponse.data.company || companyResponse.data);
+                    setChildren(kids);
+                    setSessions(sessionsResponse.data.sessions || []);
+                    setFeeTemplate(fee);
+                    setUser({ token, clientId: clientResponse.data.client.id, name: session.data.user.first_name });
+                });
+            };
+
+            // Sessions grouped by class; a class with several upcoming sessions can be booked as a series.
+            const classes = React.useMemo(() => {
+                const byClass = {};
+                sessions.forEach((s) => {
+                    if (!byClass[s.class_id]) byClass[s.class_id] = { id: s.class_id, name: s.class_name, sessions: [] };
+                    byClass[s.class_id].sessions.push(s);
+                });
+                return Object.values(byClass).map((c) => {
+                    c.sessions.sort((a, b) => new Date(a.begin_at) - new Date(b.begin_at));
+                    return c;
+                });
+            }, [sessions]);
+
+            const attendeeOf = (session) => session.session_attendees[0];
+
+            const toggleLine = (childId, key, line) => {
+                setPicked((prev) => {
+                    const forChild = Object.assign({}, prev[childId] || {});
+                    if (forChild[key]) delete forChild[key];
+                    else forChild[key] = line;
+                    return Object.assign({}, prev, { [childId]: forChild });
+                });
+            };
+
+            const needsFee = (child) => {
+                if (!feeTemplate || child.hasFee) return false;
+                return Object.values(picked[child.id] || {}).some((line) => line.membersOnly);
+            };
+
+            const orderBody = () => {
+                const lines = [];
+                const memberships = [];
+                children.forEach((child) => {
+                    Object.values(picked[child.id] || {}).forEach((line) => {
+                        const body = { session_id: line.sessionId, attendee_id: line.attendeeId, child_id: child.id };
+                        if (line.recurrenceIds.length) body.recurrence_session_ids = line.recurrenceIds;
+                        lines.push(Object.assign(body, { _label: `${child.name} – ${line.label}` }));
+                    });
+                    if (needsFee(child)) memberships.push({ membership_template_id: feeTemplate.id, child_id: child.id, _label: `${child.name} – ${feeTemplate.name}` });
+                });
+                return { lines, memberships };
+            };
+
+            const loadOrder = async (id) => {
+                const response = await axios.get(api(`/orders/${id}`), userHeaders());
+                setOrder(response.data.order);
+                return response.data.order;
+            };
+
+            const loadCards = async (token) => {
+                const response = await axios.get(api('/intake/payment_methods'), orderHeaders(token));
+                const list = response.data.cards || [];
+                setCards(list);
+                if (list.length) setCardId(list[list.length - 1].id);
+            };
+
+            // 3. One POST /orders for every child, class and fee. The server prices it (sibling discounts,
+            //    membership benefits) and returns the open ticket plus the access_token that pays it.
+            const createOrder = () => {
+                const body = orderBody();
+                const strip = (list) => list.map((item) => { const copy = Object.assign({}, item); delete copy._label; return copy; });
+                const labelFor = (key) => {
+                    const match = /^(lines|memberships)\[(\d+)\]$/.exec(key);
+                    if (!match) return null;
+                    const item = body[match[1]][parseInt(match[2], 10)];
+                    return item ? item._label : key;
+                };
+                run('order', async () => {
+                    const response = await axios.post(api('/orders'), {
+                        location_id: parseInt(CONFIG.locationId, 10),
+                        client_id: user.clientId,
+                        lines: strip(body.lines),
+                        memberships: strip(body.memberships),
+                    }, userHeaders());
+                    setOrderToken(response.data.access_token);
+                    setOrder(response.data.order);
+                    setExpired(false);
+                    setAppliedCodes([]);
+                    await loadCards(response.data.access_token);
+                }, labelFor);
+            };
+
+            const startAgain = () => {
+                setOrder(null);
+                setOrderToken('');
+                setCards([]);
+                setExpired(false);
+                setErrors([]);
+            };
+
+            const cancelOrder = () => run('cancel', async () => {
+                await axios.delete(api(`/orders/${order.id}`), userHeaders());
+                setOrder(null);
+                setOrderToken('');
+            });
+
+            // 4. Promo codes apply to the whole ticket; call once per code.
+            const applyPromo = () => run('promo', async () => {
+                await axios.post(api('/intake/promotions'), { promotion_code: promoCode.trim() }, orderHeaders());
+                await loadOrder(order.id);
+                setAppliedCodes(appliedCodes.concat(promoCode.trim().toUpperCase()));
+                setPromoCode('');
+            });
+
+            const saveCard = async (paymentMethodId) => {
+                setErrors([]);
+                await axios.post(api('/intake/payment_methods'), { token: paymentMethodId }, orderHeaders());
+                await loadCards();
+            };
+
+            // 5. Pay the balance in full. Classes and memberships are created only now, when the ticket closes.
+            const pay = () => run('pay', async () => {
+                const priced = order;
+                const response = await axios.post(api('/intake/transactions'), { card_id: cardId, amount: order.balance_due }, orderHeaders());
+                const closed = await loadOrder(order.id);
+                // Once closed, class lines come back as plain enrollments without the child or session time, so the
+                // receipt lists the lines as they were priced and takes the totals from the closed order.
+                setPaid({ ticket: response.data.ticket, transaction: response.data.transaction, order: closed, lines: priced.items });
+            });
+
+            const expiresIn = order && order.expires_at ? Math.max(0, Math.floor((new Date(order.expires_at).getTime() - now) / 1000)) : null;
+            const body = orderBody();
+
+            if (paid) {
+                return (
+                    <div className="max-w-3xl mx-auto">
+                        <div data-test="confirmation" className="bg-white rounded-lg shadow p-6">
+                            <h1 className="text-2xl font-bold text-green-700 mb-2">You're all set!</h1>
+                            <p className="mb-4">One payment of <b>{money(paid.transaction.amount)}</b> (card ending {paid.transaction.data && paid.transaction.data.last4}) on ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>
+                            <table className="w-full text-sm">
+                                <tbody>
+                                    {paid.lines.map((item) => (
+                                        <tr key={item.id} className="border-t">
+                                            <td className="py-2">{lineName(item)}{item.session_begin_at ? <span className="text-gray-500"> · {formatWhen(item.session_begin_at)}</span> : null}</td>
+                                            <td className="py-2 text-gray-500">{item.type === 'class_reservation' ? (paid.order.status === 'closed' ? 'enrolled' : '') : 'registered'}</td>
+                                            <td className="py-2 text-right">{money(item.amount)}</td>
+                                        </tr>
+                                    ))}
+                                    <tr className="border-t"><td className="py-1 text-gray-600" colSpan="2">Discounts</td><td className="text-right text-green-700">-{money(paid.order.discount)}</td></tr>
+                                    <tr className="font-semibold"><td className="py-1" colSpan="2">Paid</td><td data-test="paid-amount" className="text-right">{money(paid.transaction.amount)}</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-3xl mx-auto">
+                    <h1 className="text-2xl font-bold mb-1">{company ? company.name : 'Book classes'}</h1>
+                    <p className="text-gray-600 mb-5">One order for the whole family: several children, classes and registration fees, one payment.</p>
+                    <ErrorBox lines={errors} />
+
+                    {!user && (
+                        <Step number={1} title="Sign in">
+                            <form onSubmit={signIn} className="grid gap-3">
+                                <input data-test="email" className="border rounded p-2" placeholder="Email" value={login.email} onChange={(e) => setLogin(Object.assign({}, login, { email: e.target.value }))} />
+                                <input data-test="password" className="border rounded p-2" placeholder="Password" type="password" value={login.password} onChange={(e) => setLogin(Object.assign({}, login, { password: e.target.value }))} />
+                                <button data-test="sign-in" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={busy === 'signin'}>{busy === 'signin' ? 'Signing in…' : 'Sign in'}</button>
+                            </form>
+                        </Step>
+                    )}
+
+                    {user && !order && (
+                        <Step number={2} title={`Hi ${user.name}, pick classes for each child`}>
+                            {children.length === 0 && <p>No children on your account yet.</p>}
+                            {children.map((child) => (
+                                <div key={child.id} data-test={`child-${child.name}`} className="border rounded p-3 mb-3">
+                                    <div className="font-semibold mb-2">{child.name} {child.hasFee ? <span className="text-xs text-green-700 font-normal">· registered</span> : <span className="text-xs text-gray-500 font-normal">· new camper</span>}</div>
+                                    {classes.map((klass) => {
+                                        const first = klass.sessions[0];
+                                        const attendee = attendeeOf(first);
+                                        const membersOnly = !!(attendee.settings && attendee.settings.members_only);
+                                        const options = [];
+                                        if (klass.sessions.length > 1) {
+                                            options.push({ key: `series-${klass.id}`, label: `${klass.name} – all ${klass.sessions.length} sessions from ${formatWhen(first.begin_at)}`, sessionId: first.id, recurrenceIds: klass.sessions.slice(1).map((s) => s.id), price: attendee.price * klass.sessions.length });
+                                        }
+                                        klass.sessions.forEach((s) => options.push({ key: `session-${s.id}`, label: `${klass.name} – ${formatWhen(s.begin_at)}`, sessionId: s.id, recurrenceIds: [], price: attendeeOf(s).price, full: attendeeOf(s).enrolled_count >= attendeeOf(s).capacity }));
+                                        return (
+                                            <div key={klass.id} className="ml-2 mb-2">
+                                                {options.map((option) => (
+                                                    <label key={option.key} className={`flex items-center gap-2 text-sm py-1 ${option.full ? 'text-gray-400' : ''}`}>
+                                                        <input type="checkbox" data-test={`pick-${child.name}-${option.key}`} disabled={option.full}
+                                                            checked={!!(picked[child.id] && picked[child.id][option.key])}
+                                                            onChange={() => toggleLine(child.id, option.key, { sessionId: option.sessionId, recurrenceIds: option.recurrenceIds, attendeeId: attendee.attendee_id, membersOnly, label: option.label })} />
+                                                        <span>{option.label}</span>
+                                                        <span className="text-gray-500">{money(option.price)}{membersOnly ? ' · registered campers' : ''}{option.full ? ' · full' : ''}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        );
+                                    })}
+                                    {needsFee(child) && <div data-test={`fee-${child.name}`} className="text-sm text-amber-700 mt-1">+ {feeTemplate.name} {money(feeTemplate.membership_price || feeTemplate.price)} (one time, added automatically for new campers)</div>}
+                                </div>
+                            ))}
+                            <button data-test="create-order" onClick={createOrder} disabled={busy === 'order' || body.lines.length === 0}
+                                className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50">
+                                {busy === 'order' ? 'Creating order…' : `Create order (${body.lines.length} class line${body.lines.length === 1 ? '' : 's'}, ${body.memberships.length} fee${body.memberships.length === 1 ? '' : 's'})`}
+                            </button>
+                        </Step>
+                    )}
+
+                    {order && (
+                        <Step number={3} title={`Your order #${order.id}`}>
+                            {(expired || expiresIn === 0) && (
+                                <div data-test="expired" className="bg-amber-50 border border-amber-300 rounded p-3 mb-3 text-sm">
+                                    {ERROR_TEXT.order_expired}
+                                    <button data-test="start-again" onClick={startAgain} className="ml-3 underline">Start a new order</button>
+                                </div>
+                            )}
+                            {expiresIn !== null && !expired && (
+                                <div data-test="expires" className={`text-sm mb-3 ${expiresIn < 120 ? 'text-red-700' : 'text-gray-600'}`}>
+                                    {expiresIn > 0 ? `Seats are held for ${Math.floor(expiresIn / 60)}:${String(expiresIn % 60).padStart(2, '0')}. Unpaid orders are cancelled automatically.` : 'This order has expired. Nothing was charged; start a new order.'}
+                                </div>
+                            )}
+                            <table data-test="order-items" className="w-full text-sm mb-3">
+                                <tbody>
+                                    {order.items.map((item) => (
+                                        <tr key={item.id} className="border-t">
+                                            <td className="py-2">{lineName(item)}{item.session_begin_at ? <span className="text-gray-500"> · {formatWhen(item.session_begin_at)}</span> : null}</td>
+                                            <td className="py-2 text-right">
+                                                {Number(item.amount_before_discount) !== Number(item.amount) && <span className="line-through text-gray-400 mr-2">{money(item.amount_before_discount)}</span>}
+                                                {money(item.amount)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    <tr className="border-t"><td className="py-1 text-gray-600">Subtotal</td><td className="text-right">{money(order.subtotal)}</td></tr>
+                                    <tr><td className="py-1 text-gray-600">Discounts{appliedCodes.length ? ` (incl. ${appliedCodes.join(', ')})` : ''}</td><td data-test="discount" className="text-right text-green-700">-{money(order.discount)}</td></tr>
+                                    <tr><td className="py-1 text-gray-600">Tax</td><td className="text-right">{money(order.tax)}</td></tr>
+                                    <tr className="font-semibold"><td className="py-1">Balance due</td><td data-test="balance" className="text-right">{money(order.balance_due)}</td></tr>
+                                </tbody>
+                            </table>
+                            <div className="flex gap-2 mb-2">
+                                <input data-test="promo" className="border rounded p-2 flex-1" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value)} />
+                                <button data-test="apply-promo" onClick={applyPromo} disabled={!promoCode.trim() || busy === 'promo'} className="bg-gray-800 text-white px-4 py-2 rounded disabled:opacity-50">Apply</button>
+                            </div>
+                            <button data-test="cancel-order" onClick={cancelOrder} className="text-sm text-gray-500 underline">Cancel this order</button>
+                        </Step>
+                    )}
+
+                    {order && (
+                        <Step number={4} title="Pay">
+                            {cards.length === 0 && <p className="text-sm text-gray-600">No saved cards yet.</p>}
+                            {cards.map((card) => (
+                                <label key={card.id} className="flex items-center gap-2 text-sm py-1">
+                                    <input type="radio" name="card" data-test={`card-${card.last4}`} checked={cardId === card.id} onChange={() => setCardId(card.id)} />
+                                    {card.brand} ending {card.last4} · exp {card.exp_month}/{card.exp_year}
+                                </label>
+                            ))}
+                            <AddCard stripeKey={company && company.stripe_key} onSave={saveCard} />
+                            <button data-test="pay" onClick={pay} disabled={!cardId || busy === 'pay'}
+                                className="mt-4 bg-green-600 text-white px-6 py-2 rounded disabled:opacity-50">
+                                {busy === 'pay' ? 'Paying…' : `Pay ${money(order.balance_due)}`}
+                            </button>
+                        </Step>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
