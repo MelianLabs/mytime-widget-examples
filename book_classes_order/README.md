@@ -228,12 +228,16 @@ Key error responses from the same stack:
 
 1. Serve the repository folder (the page calls the API with `axios`, so any static server works):
    `python3 -m http.server 8090`
-2. Open `http://localhost:8090/book_classes_order/index.html?base_url=<API>&company_id=<id>&location_id=<id>`
-3. Sign in with a consumer account that has children at that company, pick classes, create the order, apply a code,
+2. Open `http://localhost:8090/book_classes_order/index.html`.
+3. On the sign-in step, enter the **MyTime domain** (`sandbox.mytime.com` to test, `www.mytime.com` for production;
+   a full URL such as `http://localhost:3000` also works), the **company ID** and **location ID** that sell the classes,
+   and the name of the **registration fee** membership.
+4. Sign in with a consumer account that has children at that company, pick classes, create the order, apply a code,
    add a card and pay.
 
-URL parameters: `base_url`, `company_id`, `location_id`, `email`, `password`, `fee_name` (the name of the registration
-fee membership, default `Registration Fee`), `days_ahead` (default 45).
+The same values can be passed as URL parameters, which pre-fill the form: `base_url`, `company_id`, `location_id`,
+`email`, `password`, `fee_name` (the name of the registration fee membership, default `Registration Fee`), and
+`days_ahead` (default 45).
 
 Requirements on the business: the Orders API enabled (MyTime turns it on per company), classes sold online, the
 registration fee as a membership template sold online, and "Enable widget token auth via headers" so the order token

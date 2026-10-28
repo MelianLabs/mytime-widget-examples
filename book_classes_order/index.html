@@ -20,12 +20,18 @@
     <div id="root"></div>
     <script type="text/babel">
         // ---------------------------------------------------------------------------------------------
-        // Configuration. Every value can also be passed as a URL parameter:
-        //   index.html?base_url=http://localhost:3000&company_id=754&location_id=1557&email=...&password=...
+        // Configuration. The domain, company and location can be typed on the sign-in step, or passed as URL parameters:
+        //   index.html?base_url=https://sandbox.mytime.com&company_id=770&location_id=1573&email=...&password=...
         // ---------------------------------------------------------------------------------------------
         const params = new URLSearchParams(window.location.search);
+        // Accepts "sandbox.mytime.com", "https://sandbox.mytime.com/" or "http://localhost:3000".
+        const normalizeBaseUrl = (value) => {
+            const trimmed = (value || '').trim().replace(/\/+$/, '');
+            if (!trimmed) return '';
+            return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+        };
         const CONFIG = {
-            baseUrl: (params.get('base_url') || 'http://localhost:3000').replace(/\/$/, ''),
+            baseUrl: normalizeBaseUrl(params.get('base_url') || 'https://sandbox.mytime.com'),
             companyId: params.get('company_id') || '',
             locationId: params.get('location_id') || '',
             // Name of the membership template that is the one-time registration fee.
@@ -168,6 +174,10 @@
 
         function App() {
             const [login, setLogin] = React.useState({ email: params.get('email') || '', password: params.get('password') || '' });
+            const [settings, setSettings] = React.useState({
+                baseUrl: CONFIG.baseUrl, companyId: CONFIG.companyId, locationId: CONFIG.locationId, feeName: CONFIG.registrationFeeName,
+            });
+            const setSetting = (key) => (e) => setSettings(Object.assign({}, settings, { [key]: e.target.value }));
             const [user, setUser] = React.useState(null);           // { token, clientId, name }
             const [company, setCompany] = React.useState(null);
             const [children, setChildren] = React.useState([]);     // [{id, name, hasFee}]
@@ -228,6 +238,12 @@
             // 1. Sign in, find the client record at this company, then load what the page needs.
             const signIn = (e) => {
                 e.preventDefault();
+                Object.assign(CONFIG, {
+                    baseUrl: normalizeBaseUrl(settings.baseUrl),
+                    companyId: settings.companyId.trim(),
+                    locationId: settings.locationId.trim(),
+                    registrationFeeName: settings.feeName.trim() || 'Registration Fee',
+                });
                 run('signin', async () => {
                     const session = await axios.post(api('/sessions'), {
                         email: login.email, password: login.password, company_id: parseInt(CONFIG.companyId, 10),
@@ -424,6 +440,20 @@
                     {!user && (
                         <Step number={1} title="Sign in">
                             <form onSubmit={signIn} className="grid gap-3">
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <label className="grid gap-1 text-sm text-gray-600">MyTime domain
+                                        <input data-test="base-url" className="border rounded p-2 text-gray-900" placeholder="sandbox.mytime.com" value={settings.baseUrl} onChange={setSetting('baseUrl')} />
+                                    </label>
+                                    <label className="grid gap-1 text-sm text-gray-600">Registration fee name
+                                        <input data-test="fee-name" className="border rounded p-2 text-gray-900" placeholder="Registration Fee" value={settings.feeName} onChange={setSetting('feeName')} />
+                                    </label>
+                                    <label className="grid gap-1 text-sm text-gray-600">Company ID
+                                        <input data-test="company-id" className="border rounded p-2 text-gray-900" placeholder="770" value={settings.companyId} onChange={setSetting('companyId')} />
+                                    </label>
+                                    <label className="grid gap-1 text-sm text-gray-600">Location ID
+                                        <input data-test="location-id" className="border rounded p-2 text-gray-900" placeholder="1573" value={settings.locationId} onChange={setSetting('locationId')} />
+                                    </label>
+                                </div>
                                 <input data-test="email" className="border rounded p-2" placeholder="Email" value={login.email} onChange={(e) => setLogin(Object.assign({}, login, { email: e.target.value }))} />
                                 <input data-test="password" className="border rounded p-2" placeholder="Password" type="password" value={login.password} onChange={(e) => setLogin(Object.assign({}, login, { password: e.target.value }))} />
                                 <button data-test="sign-in" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={busy === 'signin'}>{busy === 'signin' ? 'Signing in…' : 'Sign in'}</button>
