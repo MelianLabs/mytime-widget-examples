@@ -38,6 +38,8 @@
             registrationFeeName: params.get('fee_name') || 'Registration Fee',
             // How many days of upcoming sessions to offer.
             daysAhead: parseInt(params.get('days_ahead') || '45', 10),
+            // Optional comma-separated class ids to offer (all classes with upcoming sessions when empty).
+            classIds: (params.get('class_ids') || '').split(',').map((id) => parseInt(id, 10)).filter((id) => id > 0),
         };
 
         const api = (path) => `${CONFIG.baseUrl}/api/mkp/v1${path}`;
@@ -52,7 +54,7 @@
             session_registration_closed: 'Registration for this class is closed.',
             session_unavailable: 'This class can no longer be booked online.',
             child_not_on_account: 'This child is not on your account.',
-            membership_not_available: 'The registration fee is not available at this location.',
+            membership_not_available: 'This membership is not available at this location.',
             order_expired: 'Your order expired before it was paid. Nothing was charged. Please start a new order.',
             order_close_failed: 'The order could not be completed. Nothing was booked.',
             order_close_failed_refunded: 'Your card was charged but the booking could not be completed, so the payment was refunded automatically. Nothing was booked.',
@@ -90,6 +92,25 @@
 
         // Class times are shown in the location's time zone (set after sign-in), not the browser's.
         let LOCATION_TIME_ZONE;
+        // A class line a membership or package credit covers costs nothing; the order says which kind covered it.
+        const coverage = (item) => (item.in_membership ? 'Included in membership' : item.in_package ? 'Included in package' : null);
+        const CoveredBadge = ({ item }) => (coverage(item)
+            ? <span data-test="covered" className="ml-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">{coverage(item)}</span>
+            : null);
+        // Memberships and packages that include classes: the classes a bundle item group covers.
+        const includedClassIds = (groups) => {
+            const ids = [];
+            let all = false;
+            (groups || []).forEach((group) => {
+                if (group.include_all_classes) all = true;
+                (group.bundle_items || group.bundle_purchase_items || []).forEach((item) => {
+                    if (!item.resource_type || item.resource_type === 'MyClass::Class') ids.push(item.resource_id);
+                });
+            });
+            return { all, ids };
+        };
+        const remainingClasses = (groups) => (groups || []).reduce((sum, group) => sum + Number(group.remaining_quantity || 0), 0);
+
         const lineName = (item) => (item.child_name && item.name.indexOf(item.child_name) === -1 ? `${item.name} – ${item.child_name}` : item.name);
 
         const formatWhen = (iso) => new Date(iso).toLocaleString('en-US', {
@@ -183,6 +204,8 @@
             const [children, setChildren] = React.useState([]);     // [{id, name, hasFee}]
             const [sessions, setSessions] = React.useState([]);
             const [feeTemplate, setFeeTemplate] = React.useState(null);
+            const [offers, setOffers] = React.useState([]);          // memberships sold online that include classes
+            const [addMembership, setAddMembership] = React.useState({}); // childId -> membership template id
             const [picked, setPicked] = React.useState({});         // childId -> { sessionKey: line }
             const [order, setOrder] = React.useState(null);         // GET /orders/:id body
             const [orderToken, setOrderToken] = React.useState(''); // access_token returned by POST /orders
@@ -255,14 +278,42 @@
                     const today = new Date();
                     const until = new Date(today.getTime() + CONFIG.daysAhead * 86400000);
                     const iso = (d) => d.toISOString().split('T')[0];
-                    const [companyResponse, locationsResponse, childrenResponse, sessionsResponse, membershipsResponse, ownedResponse] = await Promise.all([
+                    const [companyResponse, locationsResponse, childrenResponse, sessionsResponse, membershipsResponse, ownedResponse, packagesResponse] = await Promise.all([
                         axios.get(api(`/companies/${CONFIG.companyId}`)),
                         axios.get(api(`/companies/${CONFIG.companyId}/locations`)),
                         axios.get(api(`/user/children?company_id=${CONFIG.companyId}`), auth),
                         axios.get(api(`/classes/sessions?company_id=${CONFIG.companyId}&location_id=${CONFIG.locationId}&start_date=${iso(today)}&end_date=${iso(until)}`), auth),
                         axios.get(api(`/companies/${CONFIG.companyId}/memberships?location_id=${CONFIG.locationId}&only_clients=false`)),
                         axios.get(api(`/user/client_memberships?company_id=${CONFIG.companyId}`), auth),
+                        axios.get(api(`/user/bundle_purchases?company_id=${CONFIG.companyId}`), auth),
                     ]);
+                    const upcoming = sessionsResponse.data.sessions || [];
+                    const includesUpcomingClass = (groups) => {
+                        const included = includedClassIds(groups);
+                        return included.all || upcoming.some((s) => included.ids.indexOf(s.class_id) !== -1);
+                    };
+                    // Memberships that include upcoming classes can be bought on the same order; the classes they include
+                    // are then covered by the new membership (buy and apply).
+                    const classOffers = (membershipsResponse.data.memberships || []).filter((m) => m.name !== CONFIG.registrationFeeName &&
+                        ((m.includes && m.includes.membership_benefits) || []).some((b) => b.benefit_type === 'Bundles::Bundle' &&
+                            includesUpcomingClass(b.benefit && b.benefit.bundle_item_groups)));
+                    const activeMemberships = (ownedResponse.data.client_memberships || []).filter((m) =>
+                        ['active', 'pending_cancelation'].indexOf(m.status) !== -1);
+                    // Class credits each child already owns: memberships and packages that include classes.
+                    // A membership holds one set of included classes per billing period; count this period's.
+                    const currentPeriod = (b) => (!b.validity_start_time || new Date(b.validity_start_time) <= new Date()) &&
+                        (!b.validity_end_time || new Date(b.validity_end_time) >= new Date());
+                    const creditsOf = (childId) => {
+                        const credits = [];
+                        activeMemberships.filter((m) => m.my_client_child_id === childId).forEach((m) => {
+                            const groups = [].concat(...(m.client_benefits || []).map((cb) => [].concat(...(cb.benefits || [])
+                                .filter((b) => b.type === 'bundle_purchase' && currentPeriod(b)).map((b) => b.bundle_purchase_item_groups || []))));
+                            if (groups.length) credits.push({ name: m.name, kind: 'membership', templateId: m.membership_template_id, left: remainingClasses(groups) });
+                        });
+                        (packagesResponse.data.bundle_purchases || []).filter((b) => b.status === 'active' && b.my_client_child_id === childId)
+                            .forEach((b) => credits.push({ name: b.name, kind: 'package', left: remainingClasses(b.bundle_purchase_item_groups) }));
+                        return credits;
+                    };
                     const fee = (membershipsResponse.data.memberships || []).find((m) => m.name === CONFIG.registrationFeeName) || null;
                     const owned = (ownedResponse.data.client_memberships || []).filter((m) =>
                         fee && m.membership_template_id === fee.id && ['active', 'pending_cancelation'].indexOf(m.status) !== -1);
@@ -272,6 +323,7 @@
                             id: child.id,
                             name: label ? label.value : `Child ${child.id}`,
                             hasFee: owned.some((m) => m.my_client_child_id === child.id),
+                            credits: creditsOf(child.id),
                         };
                     });
                     const location = (locationsResponse.data.locations || []).find((l) => String(l.id) === String(CONFIG.locationId));
@@ -280,6 +332,7 @@
                     setChildren(kids);
                     setSessions(sessionsResponse.data.sessions || []);
                     setFeeTemplate(fee);
+                    setOffers(classOffers);
                     setUser({ token, clientId: clientResponse.data.client.id, name: session.data.user.first_name });
                 });
             };
@@ -287,7 +340,7 @@
             // Sessions grouped by class; a class with several upcoming sessions can be booked as a series.
             const classes = React.useMemo(() => {
                 const byClass = {};
-                sessions.forEach((s) => {
+                sessions.filter((s) => !CONFIG.classIds.length || CONFIG.classIds.indexOf(s.class_id) !== -1).forEach((s) => {
                     if (!byClass[s.class_id]) byClass[s.class_id] = { id: s.class_id, name: s.class_name, sessions: [] };
                     byClass[s.class_id].sessions.push(s);
                 });
@@ -325,9 +378,14 @@
                         lines.push(Object.assign(body, { _label: `${child.name} – ${line.label}` }));
                     });
                     if (needsFee(child)) memberships.push({ membership_template_id: feeTemplate.id, child_id: child.id, _label: `${child.name} – ${feeTemplate.name}` });
+                    const offer = offers.find((m) => m.id === addMembership[child.id]);
+                    if (offer) memberships.push({ membership_template_id: offer.id, child_id: child.id, _label: `${child.name} – ${offer.name}` });
                 });
                 return { lines, memberships };
             };
+
+            const toggleMembership = (childId, templateId) => setAddMembership((prev) =>
+                Object.assign({}, prev, { [childId]: prev[childId] === templateId ? null : templateId }));
 
             const loadOrder = async (id) => {
                 const response = await axios.get(api(`/orders/${id}`), userHeaders());
@@ -360,8 +418,14 @@
                         lines: strip(body.lines),
                         memberships: strip(body.memberships),
                     }, userHeaders());
+                    const created = response.data.order;
+                    // Credits covered every line: the order is already closed and booked, with nothing to pay.
+                    if (created.status === 'closed') {
+                        setPaid({ ticket: { id: created.id, status: created.status }, transaction: null, order: created, lines: created.items });
+                        return;
+                    }
                     setOrderToken(response.data.access_token);
-                    setOrder(response.data.order);
+                    setOrder(created);
                     setExpired(false);
                     setAppliedCodes([]);
                     await loadCards(response.data.access_token);
@@ -414,18 +478,20 @@
                     <div className="max-w-3xl mx-auto">
                         <div data-test="confirmation" className="bg-white rounded-lg shadow p-6">
                             <h1 className="text-2xl font-bold text-green-700 mb-2">You're all set!</h1>
-                            <p className="mb-4">One payment of <b>{money(paid.transaction.amount)}</b> (card ending {paid.transaction.data && paid.transaction.data.last4}) on ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>
+                            {paid.transaction
+                                ? <p className="mb-4">One payment of <b>{money(paid.transaction.amount)}</b> (card ending {paid.transaction.data && paid.transaction.data.last4}) on ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>
+                                : <p className="mb-4">Nothing to pay: your membership and package credits cover every class. Ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>}
                             <table className="w-full text-sm">
                                 <tbody>
                                     {paid.lines.map((item) => (
                                         <tr key={item.id} className="border-t">
-                                            <td className="py-2">{lineName(item)}{item.session_begin_at ? <span className="text-gray-500"> · {formatWhen(item.session_begin_at)}</span> : null}</td>
-                                            <td className="py-2 text-gray-500">{item.type === 'class_reservation' ? (paid.order.status === 'closed' ? 'enrolled' : '') : 'registered'}</td>
+                                            <td className="py-2">{lineName(item)}{item.session_begin_at ? <span className="text-gray-500"> · {formatWhen(item.session_begin_at)}</span> : null}<CoveredBadge item={item} /></td>
+                                            <td className="py-2 text-gray-500">{item.type === 'class_reservation' || item.type === 'session_enrollment' ? (paid.order.status === 'closed' ? 'enrolled' : '') : 'registered'}</td>
                                             <td className="py-2 text-right">{money(item.amount)}</td>
                                         </tr>
                                     ))}
                                     <tr className="border-t"><td className="py-1 text-gray-600" colSpan="2">Discounts</td><td className="text-right text-green-700">-{money(paid.order.discount)}</td></tr>
-                                    <tr className="font-semibold"><td className="py-1" colSpan="2">Paid</td><td data-test="paid-amount" className="text-right">{money(paid.transaction.amount)}</td></tr>
+                                    <tr className="font-semibold"><td className="py-1" colSpan="2">Paid</td><td data-test="paid-amount" className="text-right">{money(paid.transaction ? paid.transaction.amount : 0)}</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -436,7 +502,7 @@
             return (
                 <div className="max-w-3xl mx-auto">
                     <h1 className="text-2xl font-bold mb-1">{company ? company.name : 'Book classes'}</h1>
-                    <p className="text-gray-600 mb-5">One order for the whole family: several children, classes and registration fees, one payment.</p>
+                    <p className="text-gray-600 mb-5">One order for the whole family: several children, classes, memberships and registration fees, one payment. Classes a membership or package includes cost nothing.</p>
                     <ErrorBox lines={errors} />
 
                     {!user && (
@@ -468,7 +534,12 @@
                             {children.length === 0 && <p>No children on your account yet.</p>}
                             {children.map((child) => (
                                 <div key={child.id} data-test={`child-${child.name}`} className="border rounded p-3 mb-3">
-                                    <div className="font-semibold mb-2">{child.name} {child.hasFee ? <span className="text-xs text-green-700 font-normal">· registered</span> : <span className="text-xs text-gray-500 font-normal">· new camper</span>}</div>
+                                    <div className="font-semibold mb-2">{child.name} {feeTemplate && (child.hasFee ? <span className="text-xs text-green-700 font-normal">· registered</span> : <span className="text-xs text-gray-500 font-normal">· new camper</span>)}</div>
+                                    {child.credits.map((credit) => (
+                                        <div key={`${credit.kind}-${credit.name}`} data-test={`credits-${child.name}`} className="text-sm text-green-700 mb-1">
+                                            {credit.kind === 'membership' ? 'Member' : 'Package'}: {credit.name} · {credit.left} included class{credit.left === 1 ? '' : 'es'} left
+                                        </div>
+                                    ))}
                                     {classes.map((klass) => {
                                         const first = klass.sessions[0];
                                         const attendee = attendeeOf(first);
@@ -492,12 +563,19 @@
                                             </div>
                                         );
                                     })}
+                                    {offers.filter((m) => !child.credits.some((c) => c.templateId === m.id)).map((m) => (
+                                        <label key={m.id} className="flex items-center gap-2 text-sm py-1 mt-1 text-indigo-800">
+                                            <input type="checkbox" data-test={`add-membership-${child.name}-${m.id}`} checked={addMembership[child.id] === m.id}
+                                                onChange={() => toggleMembership(child.id, m.id)} />
+                                            <span>Add {m.name} {money(m.price)}{m.payment_type === 1 ? '/month' : ''}{m.description ? ` · ${m.description}` : ''}</span>
+                                        </label>
+                                    ))}
                                     {needsFee(child) && <div data-test={`fee-${child.name}`} className="text-sm text-amber-700 mt-1">+ {feeTemplate.name} {money(feeTemplate.membership_price || feeTemplate.price)} (one time, added automatically for new campers)</div>}
                                 </div>
                             ))}
                             <button data-test="create-order" onClick={createOrder} disabled={busy === 'order' || body.lines.length === 0}
                                 className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50">
-                                {busy === 'order' ? 'Creating order…' : `Create order (${body.lines.length} class line${body.lines.length === 1 ? '' : 's'}, ${body.memberships.length} fee${body.memberships.length === 1 ? '' : 's'})`}
+                                {busy === 'order' ? 'Creating order…' : `Create order (${body.lines.length} class line${body.lines.length === 1 ? '' : 's'}, ${body.memberships.length} membership${body.memberships.length === 1 ? '' : 's'} or fee${body.memberships.length === 1 ? '' : 's'})`}
                             </button>
                         </Step>
                     )}
@@ -519,7 +597,7 @@
                                 <tbody>
                                     {order.items.map((item) => (
                                         <tr key={item.id} className="border-t">
-                                            <td className="py-2">{lineName(item)}{item.session_begin_at ? <span className="text-gray-500"> · {formatWhen(item.session_begin_at)}</span> : null}</td>
+                                            <td className="py-2">{lineName(item)}{item.session_begin_at ? <span className="text-gray-500"> · {formatWhen(item.session_begin_at)}</span> : null}<CoveredBadge item={item} /></td>
                                             <td className="py-2 text-right">
                                                 {Number(item.amount_before_discount) !== Number(item.amount) && <span className="line-through text-gray-400 mr-2">{money(item.amount_before_discount)}</span>}
                                                 {money(item.amount)}
