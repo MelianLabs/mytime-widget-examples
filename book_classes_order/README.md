@@ -16,7 +16,7 @@ through the **Marketplace Orders API**. The parent gets one ticket, pays once, a
 
 1. Sign in (consumer login) and load the client's children, upcoming class sessions and the registration fee
 2. Pick classes per child: single sessions, or a whole weekly series
-3. Add the registration fee automatically for each new child who books a members-only class
+3. Add the registration fee automatically for each new child (one who has not paid it yet) with their first booking
 4. Create the order and show the lines the server priced, with discounts
 5. Apply one or more promo codes
 6. Pick a saved card or add a Stripe card

@@ -22,6 +22,14 @@ const PASSWORD = env('DEMO_PASSWORD', '');
 const RECORD_DIR = env('RECORD_DIR', '');
 const SLOW_MO = Number(env('SLOW_MO', '0'));
 const PROMO = env('PROMO_CODE', 'SUMMER20');
+// What to book. Each pick is the start of an option label on the page; the series option reads "<class> – all N sessions".
+const CHILD_A = env('CHILD_A', 'Mia');
+const CHILD_B = env('CHILD_B', 'Leo');
+const PICKS_A = env('PICKS_A', 'Hiking Camp|Nature Explorers – all').split('|');
+const PICKS_B = env('PICKS_B', 'Hiking Camp').split('|');
+const FEE_NAME = env('FEE_NAME', 'Registration Fee');
+const EXPECT_SIBLING = env('EXPECT_SIBLING', '1') === '1';
+const picked = [...PICKS_A, ...PICKS_B].map((text) => text.replace(/ – all$/, ''));
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH;
 const { chromium, selectors } = await import(playwrightPath ? pathToFileURL(`${playwrightPath}/index.mjs`).href : 'playwright');
@@ -39,32 +47,32 @@ const pause = (ms) => (SLOW_MO ? page.waitForTimeout(ms) : Promise.resolve());
 
 let ticketId;
 try {
-  const query = new URLSearchParams({ base_url: BASE_URL, company_id: COMPANY_ID, location_id: LOCATION_ID, email: EMAIL, password: PASSWORD });
+  const query = new URLSearchParams({ base_url: BASE_URL, company_id: COMPANY_ID, location_id: LOCATION_ID, email: EMAIL, password: PASSWORD, fee_name: FEE_NAME });
   await page.goto(`${PAGE_URL}?${query}`);
   await page.getByTestId('sign-in').waitFor();
   await pause(800);
   await page.getByTestId('sign-in').click();
 
-  // Mia: Hiking Camp + the whole Nature Explorers series. Leo: Hiking Camp.
-  const mia = page.getByTestId('child-Mia');
-  const leo = page.getByTestId('child-Leo');
-  await mia.waitFor({ timeout: 30000 });
+  // By default, Mia: Hiking Camp + the whole Nature Explorers series; Leo: Hiking Camp.
+  const pick = async (childName, picks) => {
+    const child = page.getByTestId(`child-${childName}`);
+    await child.waitFor({ timeout: 30000 });
+    for (const text of picks) await child.locator('label', { hasText: text }).first().locator('input').check();
+  };
+  await pick(CHILD_A, PICKS_A);
   await pause(800);
-  await mia.locator('label', { hasText: 'Hiking Camp' }).first().locator('input').check();
-  await mia.locator('label', { hasText: /Nature Explorers – all \d+ sessions/ }).locator('input').check();
-  await leo.locator('label', { hasText: 'Hiking Camp' }).first().locator('input').check();
-  await page.getByTestId('fee-Mia').waitFor();
-  await page.getByTestId('fee-Leo').waitFor();
+  await pick(CHILD_B, PICKS_B);
+  await page.getByTestId(`fee-${CHILD_A}`).waitFor();
+  await page.getByTestId(`fee-${CHILD_B}`).waitFor();
   await pause(1200);
 
   await page.getByTestId('create-order').click();
   await page.getByTestId('order-items').waitFor({ timeout: 30000 });
   const lines = await page.getByTestId('order-items').locator('tr').allInnerTexts();
-  assert.ok(lines.filter((l) => l.includes('Hiking Camp')).length === 2, 'two Hiking Camp lines');
-  assert.ok(lines.filter((l) => l.includes('Nature Explorers')).length >= 2, 'the Nature Explorers series');
-  assert.ok(lines.filter((l) => l.includes('Registration Fee')).length === 2, 'a registration fee per child');
+  assert.ok(lines.filter((l) => picked.some((name) => l.includes(name))).length >= picked.length, 'a line for every class picked');
+  assert.ok(lines.filter((l) => l.includes(FEE_NAME)).length === 2, 'a registration fee per child');
   const discountBefore = await page.getByTestId('discount').innerText();
-  assert.notEqual(discountBefore, '-$0.00', 'the sibling discount is applied when the order is priced');
+  if (EXPECT_SIBLING) assert.notEqual(discountBefore, '-$0.00', 'the sibling discount is applied when the order is priced');
   await pause(1500);
 
   await page.getByTestId('promo').fill(PROMO);
@@ -122,9 +130,9 @@ assert.equal(order.status, 'closed');
 assert.equal(Number(order.balance_due), 0);
 // At close every class line becomes an ordinary class enrollment on the same ticket.
 const enrollments = order.items.filter((item) => item.type === 'session_enrollment');
-assert.ok(enrollments.length >= 4, 'class enrollments on the one ticket');
+assert.ok(enrollments.length >= picked.length, 'class enrollments on the one ticket');
 assert.equal(order.items.filter((item) => item.type === 'class_reservation').length, 0, 'no class line left unbooked');
 const { client_memberships: memberships } = await json(`/user/client_memberships?company_id=${COMPANY_ID}`, auth);
-const fees = memberships.filter((m) => m.name === 'Registration Fee' && m.status === 'active');
-assert.ok(fees.length >= 2, 'a Registration Fee membership for each child');
+const fees = memberships.filter((m) => m.name === FEE_NAME && m.status === 'active');
+assert.ok(fees.length >= 2, 'a registration fee membership for each child');
 console.log(`ok: ticket ${ticketId} closed, ${enrollments.length} class lines enrolled, ${fees.length} registration fees active`);

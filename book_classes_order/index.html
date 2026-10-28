@@ -309,8 +309,10 @@
             };
 
             const needsFee = (child) => {
+                // A new camper pays the one-time registration fee with their first booking, whether or not the class is
+                // members-only. Members-only classes can't be booked without it, and the order checks that.
                 if (!feeTemplate || child.hasFee) return false;
-                return Object.values(picked[child.id] || {}).some((line) => line.membersOnly);
+                return Object.keys(picked[child.id] || {}).length > 0;
             };
 
             const orderBody = () => {
