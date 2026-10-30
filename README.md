@@ -76,6 +76,12 @@ Each example includes its own detailed README.md with step-by-step instructions 
    
    **IMPORTANT SECURITY NOTE:** Please do not store the partner API key required for the webseed API call in your frontend code, as this poses a serious security risk. You'll need to implement a backend service that handles the API calls to webseed using the partner API key securely stored on your backend, and then pass the necessary data to your frontend.
 
+13. [**Book Classes Order**](./book_classes_order/README.md) - One order for several children, classes and registration fees
+    - Marketplace Orders API: one ticket priced by the server (sibling discounts, promo codes)
+    - Registration fee added automatically for new children in members-only classes
+    - Single payment through the intake APIs, with a Stripe card; classes are booked only once paid
+    - Playwright happy-path test included
+
 ## Getting Started
 
 To use these examples:
