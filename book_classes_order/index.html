@@ -580,7 +580,7 @@
 
             // Afterpay: keep what is needed to finish the payment, because the page is left for Afterpay's approval.
             const leaveForAfterpay = (clientSecret) => saveAfterpayState({
-                clientSecret, orderId: order.id, orderToken, items: order.items, user,
+                clientSecret, orderId: order.id, orderToken, items: order.items, user, timeZone: LOCATION_TIME_ZONE,
                 config: { baseUrl: CONFIG.baseUrl, companyId: CONFIG.companyId, locationId: CONFIG.locationId },
             });
 
@@ -588,13 +588,18 @@
             // PaymentIntent, which captures it and closes the order). Declined or cancelled: nothing was charged, so the
             // order is shown again to pay another way.
             const [afterpayNote, setAfterpayNote] = React.useState('');
+            const [finishingAfterpay, setFinishingAfterpay] = React.useState(!!AFTERPAY_RETURN);
             React.useEffect(() => {
                 if (!AFTERPAY_RETURN) return;
                 const saved = readAfterpayState();
                 window.history.replaceState(null, '', afterpayReturnUrl());
-                if (!saved || saved.clientSecret !== AFTERPAY_RETURN.clientSecret) return;
+                if (!saved || saved.clientSecret !== AFTERPAY_RETURN.clientSecret) {
+                    setFinishingAfterpay(false);
+                    return;
+                }
                 clearAfterpayState();
                 Object.assign(CONFIG, saved.config);
+                LOCATION_TIME_ZONE = saved.timeZone;
                 run('afterpay', async () => {
                     const companyResponse = await axios.get(api(`/companies/${CONFIG.companyId}`));
                     const companyData = companyResponse.data.company || companyResponse.data;
@@ -620,7 +625,7 @@
                     }, { headers: { Accept: 'application/json', Authorization: `Bearer ${saved.orderToken}` } });
                     const closed = await readOrder();
                     setPaid({ ticket: response.data.ticket, transaction: response.data.transaction, order: closed, lines: saved.items, afterpay: true });
-                });
+                }).finally(() => setFinishingAfterpay(false));
             }, []);
 
             const expiresIn = order && order.expires_at ? Math.max(0, Math.floor((new Date(order.expires_at).getTime() - now) / 1000)) : null;
@@ -650,6 +655,14 @@
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                );
+            }
+
+            if (finishingAfterpay) {
+                return (
+                    <div className="max-w-3xl mx-auto">
+                        <div data-test="afterpay-finishing" className="bg-white rounded-lg shadow p-6">Finishing your Afterpay payment…</div>
                     </div>
                 );
             }
