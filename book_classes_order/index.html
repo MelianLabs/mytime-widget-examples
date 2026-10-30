@@ -40,6 +40,9 @@
             daysAhead: parseInt(params.get('days_ahead') || '45', 10),
             // Optional comma-separated class ids to offer (all classes with upcoming sessions when empty).
             classIds: (params.get('class_ids') || '').split(',').map((id) => parseInt(id, 10)).filter((id) => id > 0),
+            // Afterpay only: whether the business requires a card on file to sell a membership (its "Require credit card
+            // for membership purchase" setting, on by default). Set memberships_need_card=0 when the business turned it off.
+            membershipsNeedCard: params.get('memberships_need_card') !== '0',
         };
 
         const api = (path) => `${CONFIG.baseUrl}/api/mkp/v1${path}`;
@@ -63,6 +66,7 @@
             order_not_supported: 'Pay this order with the Pay button.',
             order_not_pending: 'This order is no longer open.',
             order_must_be_paid_in_full: 'An order must be paid in full.',
+            saved_payment_method_required: 'This order includes a membership, so the business needs a card on file: save a card first.',
             ticket_void: 'This order was cancelled or expired.',
             not_found: 'Online class orders are not available for this business.',
             orders_api_disabled: 'Online class orders are switched off right now. Please try again later.',
@@ -127,6 +131,44 @@
                 types.indexOf('order_expired') !== -1 || types.indexOf('ticket_void') !== -1;
         };
 
+        // ---------------------------------------------------------------------------------------------
+        // Afterpay (optional). Offered only when the payment session says so (afterpay_available): the business has
+        // Afterpay on, its Stripe account can take it, and the balance is within Afterpay's limits ($1–$4,000 USD).
+        // The parent approves on Afterpay's page, so this page is left and loaded again: what it needs to finish the
+        // payment is kept in sessionStorage for that round trip.
+        // ---------------------------------------------------------------------------------------------
+        const AFTERPAY_STORE = 'book_classes_order.afterpay';
+        const saveAfterpayState = (state) => sessionStorage.setItem(AFTERPAY_STORE, JSON.stringify(state));
+        const readAfterpayState = () => {
+            try { return JSON.parse(sessionStorage.getItem(AFTERPAY_STORE) || 'null'); } catch (ignored) { return null; }
+        };
+        const clearAfterpayState = () => sessionStorage.removeItem(AFTERPAY_STORE);
+        // Stripe adds these to the return URL when the parent comes back from Afterpay.
+        const AFTERPAY_RETURN_PARAMS = ['payment_intent', 'payment_intent_client_secret', 'redirect_status'];
+        const AFTERPAY_RETURN = params.get('payment_intent_client_secret')
+            ? { clientSecret: params.get('payment_intent_client_secret'), redirectStatus: params.get('redirect_status') }
+            : null;
+        const afterpayReturnUrl = () => {
+            const url = new URL(window.location.href);
+            AFTERPAY_RETURN_PARAMS.forEach((key) => url.searchParams.delete(key));
+            return url.toString();
+        };
+        // An approved Afterpay payment is held, not yet taken: POST /intake/transactions captures it and closes the order.
+        const AFTERPAY_APPROVED = ['requires_capture', 'succeeded'];
+
+        // The same session call MyTime's own invoice page makes. It creates the Stripe PaymentIntent for the balance and
+        // says whether Afterpay is offered on it.
+        const afterpaySession = async (order, orderToken) => {
+            const response = await axios.get(api('/user/payment_methods/session'), {
+                headers: { Accept: 'application/json', Authorization: `Bearer ${orderToken}` },
+                params: {
+                    company_id: CONFIG.companyId, location_id: CONFIG.locationId, callback_url: afterpayReturnUrl(),
+                    payment_type: 'card', add_to_client: false, guest: false, wallet: false, amount: order.balance_due,
+                },
+            });
+            return response.data; // { client_secret, afterpay_available }
+        };
+
         function ErrorBox({ lines }) {
             if (!lines || lines.length === 0) return null;
             return (
@@ -188,6 +230,72 @@
                     <button data-test="save-card" onClick={save} disabled={disabled || busy || !stripe}
                         className="mt-3 bg-gray-800 text-white px-4 py-2 rounded disabled:opacity-50">
                         {busy ? 'Saving…' : 'Save card'}
+                    </button>
+                </div>
+            );
+        }
+
+        // "Pay with Afterpay": billing details, then Stripe sends the parent to Afterpay to approve. Shown only when the
+        // session for the current balance offers Afterpay.
+        function AfterpayOption({ stripeKey, order, orderToken, name, email, hasCard, onLeave, disabled }) {
+            const [session, setSession] = React.useState(null);
+            const [billing, setBilling] = React.useState({ name: name || '', line1: '', city: '', state: '', postal_code: '' });
+            const [busy, setBusy] = React.useState(false);
+            const [error, setError] = React.useState('');
+
+            React.useEffect(() => {
+                let current = true;
+                setSession(null);
+                afterpaySession(order, orderToken)
+                    .then((data) => { if (current) setSession(data); })
+                    .catch((err) => console.error('afterpay session', err.response ? err.response.data : err));
+                return () => { current = false; };
+            }, [order.id, order.balance_due, orderToken]);
+
+            if (!stripeKey || !session || !session.afterpay_available) return null;
+
+            const set = (key) => (e) => setBilling(Object.assign({}, billing, { [key]: e.target.value }));
+            const complete = billing.name && billing.line1 && billing.city && billing.state && billing.postal_code;
+            // MyTime refuses an order holding a membership (a registration fee too) from a client with no saved card when the
+            // business requires a card for memberships, and it refuses only after Afterpay approved. Ask for the card first.
+            const needsCard = CONFIG.membershipsNeedCard && !hasCard && order.items.some((item) => item.type === 'membership_purchase');
+
+            const payWithAfterpay = async () => {
+                setBusy(true);
+                setError('');
+                onLeave(session.client_secret);
+                const address = { line1: billing.line1, city: billing.city, state: billing.state, postal_code: billing.postal_code, country: 'US' };
+                const result = await Stripe(stripeKey).confirmAfterpayClearpayPayment(session.client_secret, {
+                    payment_method: { billing_details: { name: billing.name, email, address } },
+                    shipping: { name: billing.name, address },
+                    return_url: afterpayReturnUrl(),
+                });
+                // Reached only when Stripe could not send the parent to Afterpay.
+                if (result.error) {
+                    clearAfterpayState();
+                    setError(result.error.message);
+                    setBusy(false);
+                }
+            };
+
+            return (
+                <div data-test="afterpay" className="border-t mt-5 pt-4">
+                    <div className="font-semibold mb-1">Or pay with Afterpay</div>
+                    <p className="text-sm text-gray-600 mb-2">4 interest-free payments of {money(order.balance_due / 4)}. You approve on Afterpay's page and come back here.</p>
+                    <div className="grid gap-2 sm:grid-cols-2 mb-2">
+                        <input data-test="afterpay-name" className="border rounded p-2 sm:col-span-2" placeholder="Name" value={billing.name} onChange={set('name')} />
+                        <input data-test="afterpay-line1" className="border rounded p-2 sm:col-span-2" placeholder="Billing address" value={billing.line1} onChange={set('line1')} />
+                        <input data-test="afterpay-city" className="border rounded p-2" placeholder="City" value={billing.city} onChange={set('city')} />
+                        <div className="flex gap-2">
+                            <input data-test="afterpay-state" className="border rounded p-2 w-20" placeholder="State" value={billing.state} onChange={set('state')} />
+                            <input data-test="afterpay-zip" className="border rounded p-2 flex-1" placeholder="ZIP" value={billing.postal_code} onChange={set('postal_code')} />
+                        </div>
+                    </div>
+                    {error && <div className="text-sm text-red-700 mb-2">{error}</div>}
+                    {needsCard && <div data-test="afterpay-needs-card" className="text-sm text-gray-600 mb-2">This order includes a membership, so the business needs a card on file: save a card above, then pay with Afterpay.</div>}
+                    <button data-test="pay-afterpay" onClick={payWithAfterpay} disabled={disabled || busy || !complete || needsCard}
+                        className="bg-black text-white px-6 py-2 rounded disabled:opacity-50">
+                        {busy ? 'Opening Afterpay…' : `Pay ${money(order.balance_due)} with Afterpay`}
                     </button>
                 </div>
             );
@@ -470,6 +578,51 @@
                 setPaid({ ticket: response.data.ticket, transaction: response.data.transaction, order: closed, lines: priced.items });
             });
 
+            // Afterpay: keep what is needed to finish the payment, because the page is left for Afterpay's approval.
+            const leaveForAfterpay = (clientSecret) => saveAfterpayState({
+                clientSecret, orderId: order.id, orderToken, items: order.items, user,
+                config: { baseUrl: CONFIG.baseUrl, companyId: CONFIG.companyId, locationId: CONFIG.locationId },
+            });
+
+            // Back from Afterpay. Approved: record the payment on the order (POST /intake/transactions with the
+            // PaymentIntent, which captures it and closes the order). Declined or cancelled: nothing was charged, so the
+            // order is shown again to pay another way.
+            const [afterpayNote, setAfterpayNote] = React.useState('');
+            React.useEffect(() => {
+                if (!AFTERPAY_RETURN) return;
+                const saved = readAfterpayState();
+                window.history.replaceState(null, '', afterpayReturnUrl());
+                if (!saved || saved.clientSecret !== AFTERPAY_RETURN.clientSecret) return;
+                clearAfterpayState();
+                Object.assign(CONFIG, saved.config);
+                run('afterpay', async () => {
+                    const companyResponse = await axios.get(api(`/companies/${CONFIG.companyId}`));
+                    const companyData = companyResponse.data.company || companyResponse.data;
+                    setCompany(companyData);
+                    setUser(saved.user);
+                    setOrderToken(saved.orderToken);
+                    const readOrder = async () => (await axios.get(api(`/orders/${saved.orderId}`),
+                        { headers: { Accept: 'application/json', Authorization: saved.user.token } })).data.order;
+                    setOrder(await readOrder());
+                    await loadCards(saved.orderToken);
+                    const { paymentIntent, error } = await Stripe(companyData.stripe_key).retrievePaymentIntent(saved.clientSecret);
+                    if (error) throw error;
+                    if (AFTERPAY_APPROVED.indexOf(paymentIntent.status) === -1) {
+                        setAfterpayNote('Afterpay did not approve the payment. Nothing was charged: pay with a card, or try Afterpay again.');
+                        return;
+                    }
+                    const response = await axios.post(api('/intake/transactions'), {
+                        payment_intent: {
+                            id: paymentIntent.id, amount: paymentIntent.amount, status: paymentIntent.status,
+                            payment_method: { id: paymentIntent.payment_method, type: 'afterpay_clearpay' },
+                        },
+                        payment_method_type: 'afterpay_clearpay',
+                    }, { headers: { Accept: 'application/json', Authorization: `Bearer ${saved.orderToken}` } });
+                    const closed = await readOrder();
+                    setPaid({ ticket: response.data.ticket, transaction: response.data.transaction, order: closed, lines: saved.items, afterpay: true });
+                });
+            }, []);
+
             const expiresIn = order && order.expires_at ? Math.max(0, Math.floor((new Date(order.expires_at).getTime() - now) / 1000)) : null;
             const body = orderBody();
 
@@ -478,7 +631,9 @@
                     <div className="max-w-3xl mx-auto">
                         <div data-test="confirmation" className="bg-white rounded-lg shadow p-6">
                             <h1 className="text-2xl font-bold text-green-700 mb-2">You're all set!</h1>
-                            {paid.transaction
+                            {paid.afterpay && paid.transaction
+                                ? <p data-test="afterpay-paid" className="mb-4">One payment of <b>{money(paid.transaction.amount)}</b> with <b>Afterpay</b> on ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>
+                                : paid.transaction
                                 ? <p className="mb-4">One payment of <b>{money(paid.transaction.amount)}</b> (card ending {paid.transaction.data && paid.transaction.data.last4}) on ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>
                                 : <p className="mb-4">Nothing to pay: your membership and package credits cover every class. Ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>}
                             <table className="w-full text-sm">
@@ -632,6 +787,11 @@
                                 className="mt-4 bg-green-600 text-white px-6 py-2 rounded disabled:opacity-50">
                                 {busy === 'pay' ? 'Paying…' : `Pay ${money(order.balance_due)}`}
                             </button>
+                            {afterpayNote && <div data-test="afterpay-note" className="bg-amber-50 border border-amber-300 rounded p-3 mt-4 text-sm">{afterpayNote}</div>}
+                            {company && company.enable_afterpay && !expired && (
+                                <AfterpayOption stripeKey={company.stripe_key} order={order} orderToken={orderToken} name={user && user.name}
+                                    email={login.email} hasCard={cards.length > 0} onLeave={leaveForAfterpay} disabled={busy === 'pay'} />
+                            )}
                         </Step>
                     )}
                 </div>

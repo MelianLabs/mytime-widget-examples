@@ -19,7 +19,7 @@ through the **Marketplace Orders API**. The parent gets one ticket, pays once, a
 3. Add the registration fee automatically for each new child (one who has not paid it yet) with their first booking
 4. Create the order and show the lines the server priced, with discounts
 5. Apply one or more promo codes
-6. Pick a saved card or add a Stripe card
+6. Pick a saved card or add a Stripe card, or pay with Afterpay when the business offers it (see *Afterpay (optional)*)
 7. Pay once and see the single ticket with every class enrolled
 
 Errors are shown inline: a full class, a members-only class without the fee, an expired order and a declined card.
@@ -188,6 +188,64 @@ Known issue: today the 401 (and the 422 refusals of `/intake/promotions`) reach 
 `axios` reports a network error with no response. The example handles it by re-reading the order with the user token
 (`GET /orders/{id}`). If the order is no longer open, or `expires_at` has passed, the page treats it as expired.
 
+## Afterpay (optional)
+
+The pay step can also offer **Pay with Afterpay** (four interest-free payments). It is an add-on: the card flow above
+is unchanged, and the page shows Afterpay only when the payment session says it is offered.
+
+**Requirements**
+
+- Afterpay turned on for the business by MyTime, on a Stripe account that can take Afterpay. `GET /companies/{id}`
+  then returns `enable_afterpay: true` and `afterpay_capability_active: true`.
+- A balance between **$1 and $4,000 USD** (`afterpay_min_amount` / `afterpay_max_amount` on the same response).
+- Billing name, email and address. The example sends the billing address as the shipping address too.
+- An order with a membership line (a registration fee is one) needs a **saved card on the client**, unless the business has
+  switched off *Require credit card for membership purchase* (POS settings). Otherwise `POST /intake/transactions` refuses
+  with `saved_payment_method_required`, after Afterpay has already approved. The example asks for the card first. Pass
+  `memberships_need_card=0` in the URL when the business has switched that setting off.
+
+**Calls, in order** (all with `Authorization: Bearer <order access_token>`)
+
+1. `GET /user/payment_methods/session?company_id=&location_id=&amount=<balance_due>&payment_type=card&add_to_client=false&guest=false&wallet=false&callback_url=<this page>`.
+   This is the same call MyTime's invoice page makes. It returns `{ "client_secret": "pi_…_secret_…", "afterpay_available": true }`.
+   Show Afterpay only when `afterpay_available` is `true`. Call it again whenever the balance changes, for example after a
+   promo code.
+2. In the browser, use `Stripe(company.stripe_key).confirmAfterpayClearpayPayment(client_secret, { payment_method: { billing_details: { name, email, address } }, shipping: { name, address }, return_url })`.
+   Stripe sends the parent to Afterpay to approve. In test mode this is Stripe's page with *Authorize* and *Fail* test payment
+   buttons.
+3. Afterpay sends the parent back to `return_url` with `payment_intent`, `payment_intent_client_secret` and
+   `redirect_status`. Read the payment with `stripe.retrievePaymentIntent(client_secret)`:
+   - `requires_capture` (approved and held) or `succeeded`: record it on the order.
+   - Anything else (declined or cancelled): nothing was charged, and the order is still open. Offer the card, or Afterpay
+     again.
+4. Record the payment on the order with `POST /intake/transactions`:
+
+   ```json
+   { "payment_intent": { "id": "pi_…", "amount": 15000, "status": "requires_capture",
+                         "payment_method": { "id": "pm_…", "type": "afterpay_clearpay" } },
+     "payment_method_type": "afterpay_clearpay" }
+   ```
+
+   MyTime captures the held amount and closes the order, the same way the card flow does: `201` with
+   `ticket.status: "closed"`. The ticket's payment is an Afterpay (`afterpay_clearpay`) transaction. The payment errors in
+   the table above apply here too.
+
+The page leaves for Afterpay, so whatever it needs to finish (the order id, the order and user tokens, and the lines
+priced) has to survive the round trip. The example keeps them in `sessionStorage` and removes them on return.
+
+**Caveats**
+
+- **The order can expire while the parent is at Afterpay.** Seats are held for 20 minutes from the order's creation, and
+  the approval does not extend that. If the parent comes back after `expires_at`, `POST /intake/transactions` returns
+  `401 access_token expired`, and the order is voided. Afterpay's approval is then left as an authorization that MyTime
+  never captures, until Stripe cancels it when it lapses. Start Afterpay with enough time left on the countdown.
+- **Nothing finishes the payment if the browser never comes back.** MyTime completes an approved Afterpay payment on its
+  own only for gift cards and packages bought on MyTime's pages, not for orders. If the parent closes the tab after
+  approving, the order stays open until it expires, and the Afterpay authorization is never captured, as above.
+- The same applies to any refusal at step 4 (a seat taken meanwhile, `saved_payment_method_required`): Afterpay has
+  approved, but MyTime captures nothing and books nothing. Check what you can before step 2.
+- Every session call creates a new Stripe PaymentIntent. Unused ones are never charged.
+
 ## Expiry
 
 An order holds its seats for 20 minutes (`order.expires_at`), and its `access_token` stops working at the same moment
@@ -236,8 +294,8 @@ Key error responses from the same stack:
    add a card and pay.
 
 The same values can be passed as URL parameters, which pre-fill the form: `base_url`, `company_id`, `location_id`,
-`email`, `password`, `fee_name` (the name of the registration fee membership, default `Registration Fee`), and
-`days_ahead` (default 45).
+`email`, `password`, `fee_name` (the name of the registration fee membership, default `Registration Fee`),
+`days_ahead` (default 45), and `memberships_need_card` (Afterpay only, see above).
 
 Requirements on the business: the Orders API enabled (MyTime turns it on per company), classes sold online, the
 registration fee as a membership template sold online, and "Enable widget token auth via headers" so the order token
@@ -260,7 +318,11 @@ PAGE_URL=http://localhost:8090/book_classes_order/index.html BASE_URL=http://loc
   node book_classes_order/e2e/happy_path.mjs
 ```
 
-`RECORD_DIR=<dir>` records a video and `SLOW_MO=<ms>` slows every step down. The test expects two children who have not
+`RECORD_DIR=<dir>` records a video and `SLOW_MO=<ms>` slows every step down.
+
+`e2e/afterpay_path.mjs` pays an order with Afterpay on Stripe's test page (`AFTERPAY_OUTCOME=authorize`), or declines
+there (`AFTERPAY_OUTCOME=fail`) and checks that the order is still open with nothing charged. It needs a business with
+Afterpay on. The header of the file lists its settings (`CHILD`, `PICKS`, `SAVE_CARD`, `MEMBERSHIPS_NEED_CARD`). The test expects two children who have not
 paid the registration fee yet, so run it against freshly seeded test data.
 
 ## Security
