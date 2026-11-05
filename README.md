@@ -82,6 +82,11 @@ Each example includes its own detailed README.md with step-by-step instructions 
     - Single payment through the intake APIs, with a Stripe card; classes are booked only once paid
     - Playwright happy-path test included
 
+14. [**Book Appointment Order**](./book_appointment_order/README.md) - An appointment and a membership in one order
+    - Marketplace Orders API: the picked time is held for the client while they pay
+    - Shows what another client sees: the held time is not offered
+    - Single payment through the intake APIs, with a Stripe card; the appointment is booked only once paid
+
 ## Getting Started
 
 To use these examples:
