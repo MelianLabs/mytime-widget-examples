@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book an Appointment and a Membership (one order)</title>
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Stripe.js -->
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div id="root"></div>
+    <script type="text/babel">
+        // ---------------------------------------------------------------------------------------------
+        // Configuration. The domain, company and location can be typed on the sign-in step, or passed as URL parameters:
+        //   index.html?base_url=https://sandbox.mytime.com&company_id=770&location_id=1573&email=...&password=...
+        // ---------------------------------------------------------------------------------------------
+        const params = new URLSearchParams(window.location.search);
+        // Accepts "sandbox.mytime.com", "https://sandbox.mytime.com/" or "http://localhost:3000".
+        const normalizeBaseUrl = (value) => {
+            const trimmed = (value || '').trim().replace(/\/+$/, '');
+            if (!trimmed) return '';
+            return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+        };
+        const CONFIG = {
+            baseUrl: normalizeBaseUrl(params.get('base_url') || 'https://sandbox.mytime.com'),
+            companyId: params.get('company_id') || '',
+            locationId: params.get('location_id') || '',
+            // How many days ahead to offer.
+            daysAhead: parseInt(params.get('days_ahead') || '14', 10),
+        };
+
+        const api = (path) => `${CONFIG.baseUrl}/api/mkp/v1${path}`;
+        const money = (value) => `$${Number(value || 0).toFixed(2)}`;
+
+        // Error codes the Orders and intake APIs return, in words a client understands.
+        const ERROR_TEXT = {
+            slot_unavailable: 'This time is no longer available. Please pick another time.',
+            no_available_employees: 'No one can take this appointment at this time.',
+            appointments_not_supported: 'Appointments cannot be booked through an order at this business.',
+            membership_not_available: 'This membership is not available at this location.',
+            order_expired: 'Your order expired before it was paid. Nothing was charged. Please start a new order.',
+            order_close_failed: 'The order could not be completed. Nothing was booked.',
+            order_close_failed_refunded: 'Your card was charged but the booking could not be completed, so the payment was refunded automatically. Nothing was booked.',
+            order_close_failed_refund_failed: 'Your card was charged but the booking could not be completed. The refund did not go through automatically; the business has been alerted and will refund you.',
+            order_already_charged: 'A payment is already recorded on this order. Please do not pay again; contact the business.',
+            order_not_pending: 'This order is no longer open.',
+            order_must_be_paid_in_full: 'An order must be paid in full.',
+            saved_payment_method_required: 'This order includes a membership, so the business needs a card on file: save a card first.',
+            ticket_void: 'This order was cancelled or expired.',
+            not_found: 'Online orders are not available for this business.',
+            orders_api_disabled: 'Online orders are switched off right now. Please try again later.',
+        };
+
+        // Turns {errors: {"appointments[0]": [{type: "slot_unavailable"}], general: [...]}} into readable lines.
+        const describeErrors = (err, labelFor) => {
+            const data = err && err.response && err.response.data;
+            if (!data || !data.errors) return [err && err.message ? err.message : 'Something went wrong.'];
+            const lines = [];
+            Object.keys(data.errors).forEach((key) => {
+                const list = Array.isArray(data.errors[key]) ? data.errors[key] : [data.errors[key]];
+                list.forEach((item) => {
+                    const type = item && item.type;
+                    let text = typeof type === 'string' ? (ERROR_TEXT[type] || type) : (typeof item === 'string' ? item : 'Something went wrong.');
+                    if (item && item.message) text = `${text} ${item.message}`.trim();
+                    const label = labelFor ? labelFor(key) : null;
+                    lines.push(label ? `${label}: ${text}` : text);
+                });
+            });
+            return lines;
+        };
+
+        // Times are shown in the location's time zone (set after sign-in), not the browser's.
+        let LOCATION_TIME_ZONE;
+        const formatWhen = (iso) => new Date(iso).toLocaleString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: LOCATION_TIME_ZONE,
+        });
+        const formatTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: LOCATION_TIME_ZONE });
+        const isoDate = (d) => d.toISOString().split('T')[0];
+        const countdown = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+        // An order whose time is no longer held: 401 access_token expired (the payment token expires with the order),
+        // order_expired, or ticket_void after the expiry sweep voided it.
+        const isExpiredOrder = (err) => {
+            const data = err && err.response && err.response.data;
+            const errors = (data && data.errors) || {};
+            const types = [].concat(errors.access_token || [], errors.general || [], errors.status || []).map((e) => e && e.type);
+            return (err.response && err.response.status === 401 && types.indexOf('expired') !== -1) ||
+                types.indexOf('order_expired') !== -1 || types.indexOf('ticket_void') !== -1;
+        };
+
+        // Open times for one service (and optionally one staff member) on one day. This call needs no sign-in, so it
+        // is also what any other client of the business sees.
+        const openTimes = async ({ date, variationId, employeeId }) => {
+            const response = await axios.get(api('/open_times'), {
+                params: {
+                    date, location_id: CONFIG.locationId, variation_ids: variationId, employee_ids: employeeId || '',
+                    is_existing_customer: false, include_tax: false, include_fulfillments: false, child_id: '',
+                },
+            });
+            return response.data.open_times || [];
+        };
+        const sameStart = (a, b) => new Date(a).getTime() === new Date(b).getTime();
+
+        function ErrorBox({ lines }) {
+            if (!lines || lines.length === 0) return null;
+            return (
+                <div data-test="error" className="bg-red-50 border border-red-300 text-red-800 rounded p-3 mb-4">
+                    {lines.map((line, i) => <div key={i}>{line}</div>)}
+                </div>
+            );
+        }
+
+        function Step({ number, title, children }) {
+            return (
+                <div className="bg-white rounded-lg shadow p-5 mb-5">
+                    <h2 className="text-lg font-semibold mb-3">{number}. {title}</h2>
+                    {children}
+                </div>
+            );
+        }
+
+        // Stripe card entry: creates a PaymentMethod in the browser and saves it on the client's wallet
+        // through POST /intake/payment_methods. Card numbers never reach your server or MyTime's.
+        function AddCard({ stripeKey, onSave, disabled }) {
+            const mountRef = React.useRef(null);
+            const [stripe, setStripe] = React.useState(null);
+            const [card, setCard] = React.useState(null);
+            const [busy, setBusy] = React.useState(false);
+            const [error, setError] = React.useState('');
+
+            React.useEffect(() => {
+                if (!stripeKey || !mountRef.current) return undefined;
+                const instance = Stripe(stripeKey);
+                const element = instance.elements().create('card', { hidePostalCode: true });
+                element.mount(mountRef.current);
+                setStripe(instance);
+                setCard(element);
+                return () => element.destroy();
+            }, [stripeKey]);
+
+            const save = async () => {
+                setError('');
+                setBusy(true);
+                try {
+                    const result = await stripe.createPaymentMethod({ type: 'card', card });
+                    if (result.error) throw new Error(result.error.message);
+                    await onSave(result.paymentMethod.id);
+                    card.clear();
+                } catch (err) {
+                    const data = err.response && err.response.data;
+                    setError(data && data.error ? data.error : err.message);
+                } finally {
+                    setBusy(false);
+                }
+            };
+
+            return (
+                <div className="border rounded p-3 mt-3">
+                    <div className="text-sm text-gray-600 mb-2">Add a card (test mode: 4242 4242 4242 4242, any future date, any CVC)</div>
+                    <div ref={mountRef} data-test="card-element" className="border rounded p-3 bg-white"></div>
+                    {error && <div data-test="card-error" className="text-red-700 text-sm mt-2">{error}</div>}
+                    <button data-test="save-card" onClick={save} disabled={disabled || busy || !stripe}
+                        className="mt-3 bg-gray-800 text-white px-4 py-2 rounded disabled:opacity-50">
+                        {busy ? 'Saving…' : 'Save card'}
+                    </button>
+                </div>
+            );
+        }
+
+        // What another client of the business sees for the same day: the open times call without any sign-in.
+        // While the order holds a time, that time is missing from this list.
+        function OtherClientView({ appointment }) {
+            const [times, setTimes] = React.useState(null);
+            const [checkedAt, setCheckedAt] = React.useState(null);
+            const check = async () => {
+                const list = await openTimes({ date: appointment.date, variationId: appointment.variationId, employeeId: appointment.employeeId });
+                setTimes(list);
+                setCheckedAt(new Date());
+            };
+            const held = times && !times.some((t) => sameStart(t.begin_at, appointment.beginAt));
+            return (
+                <div data-test="other-client" className="border border-dashed rounded p-3 mt-3 bg-gray-50">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="text-sm font-semibold">What another client sees for {appointment.serviceName}{appointment.employeeName ? ` with ${appointment.employeeName}` : ''} on {appointment.dayLabel}</div>
+                        <button data-test="check-other-client" onClick={check} className="text-sm bg-white border rounded px-3 py-1">Check availability</button>
+                    </div>
+                    {times && (
+                        <div>
+                            <div className="flex flex-wrap gap-1 mb-2">
+                                {times.slice(0, 16).map((t) => (
+                                    <span key={t.begin_at} className="text-xs border rounded px-2 py-1 bg-white">{formatTime(t.begin_at)}</span>
+                                ))}
+                                {times.length === 0 && <span className="text-xs text-gray-500">No open times.</span>}
+                            </div>
+                            <div data-test="other-client-result" className={`text-sm ${held ? 'text-green-700' : 'text-amber-700'}`}>
+                                {held
+                                    ? `${formatTime(appointment.beginAt)} is not offered to anyone else: your order holds it.`
+                                    : `${formatTime(appointment.beginAt)} is still offered to others.`}
+                                <span className="text-gray-400"> (checked {checkedAt.toLocaleTimeString()})</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function App() {
+            const [login, setLogin] = React.useState({ email: params.get('email') || '', password: params.get('password') || '' });
+            const [settings, setSettings] = React.useState({ baseUrl: CONFIG.baseUrl, companyId: CONFIG.companyId, locationId: CONFIG.locationId });
+            const setSetting = (key) => (e) => setSettings(Object.assign({}, settings, { [key]: e.target.value }));
+            const [user, setUser] = React.useState(null);           // { token, clientId, name }
+            const [company, setCompany] = React.useState(null);
+            const [services, setServices] = React.useState([]);     // [{variationId, name, price, duration}]
+            const [employees, setEmployees] = React.useState([]);
+            const [memberships, setMemberships] = React.useState([]);
+            const [variationId, setVariationId] = React.useState(null);
+            const [employeeId, setEmployeeId] = React.useState('');
+            const [date, setDate] = React.useState(null);
+            const [times, setTimes] = React.useState([]);
+            const [time, setTime] = React.useState(null);
+            const [membershipId, setMembershipId] = React.useState(null);
+            const [order, setOrder] = React.useState(null);         // order body from POST/GET /orders
+            const [orderToken, setOrderToken] = React.useState(''); // access_token returned by POST /orders
+            const [booked, setBooked] = React.useState(null);       // the appointment the order holds, for the other-client view
+            const [cards, setCards] = React.useState([]);
+            const [cardId, setCardId] = React.useState('');
+            const [paid, setPaid] = React.useState(null);
+            const [errors, setErrors] = React.useState([]);
+            const [busy, setBusy] = React.useState('');
+            const [now, setNow] = React.useState(Date.now());
+            const [expired, setExpired] = React.useState(false);
+
+            React.useEffect(() => {
+                const timer = setInterval(() => setNow(Date.now()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            const userHeaders = () => ({ headers: { Accept: 'application/json', Authorization: user.token } });
+            // Intake (payment) calls authenticate with the order's access_token, not the user token.
+            const orderHeaders = (token) => ({ headers: { Accept: 'application/json', Authorization: `Bearer ${token || orderToken}` } });
+
+            const run = async (label, fn, labelFor) => {
+                setErrors([]);
+                setBusy(label);
+                try {
+                    return await fn();
+                } catch (err) {
+                    console.error(label, err.response ? err.response.data : err);
+                    if (isExpiredOrder(err)) {
+                        setExpired(true);
+                        return null;
+                    }
+                    setErrors(describeErrors(err, labelFor));
+                    return null;
+                } finally {
+                    setBusy('');
+                }
+            };
+
+            // 1. Sign in, find the client record at this company, then load services, staff and memberships.
+            const signIn = (e) => {
+                e.preventDefault();
+                Object.assign(CONFIG, {
+                    baseUrl: normalizeBaseUrl(settings.baseUrl), companyId: settings.companyId.trim(), locationId: settings.locationId.trim(),
+                });
+                run('signin', async () => {
+                    const session = await axios.post(api('/sessions'), {
+                        email: login.email, password: login.password, company_id: parseInt(CONFIG.companyId, 10),
+                    });
+                    const token = session.data.user.authentication_token;
+                    const auth = { headers: { Authorization: token } };
+                    const clientResponse = await axios.put(api('/user/client'),
+                        { company_id: parseInt(CONFIG.companyId, 10), client: { preferred_language: 'en-US' } }, auth);
+                    const [companyResponse, locationsResponse, dealsResponse, employeesResponse, membershipsResponse, pricingsResponse] = await Promise.all([
+                        axios.get(api(`/companies/${CONFIG.companyId}`)),
+                        axios.get(api(`/companies/${CONFIG.companyId}/locations`)),
+                        axios.get(api(`/companies/${CONFIG.companyId}/deals?location_ids=${CONFIG.locationId}&variation_setting=true`)),
+                        axios.get(api(`/companies/${CONFIG.companyId}/employees?location_ids=${CONFIG.locationId}`)),
+                        axios.get(api(`/companies/${CONFIG.companyId}/memberships?location_id=${CONFIG.locationId}&only_clients=false`)),
+                        axios.get(api(`/companies/${CONFIG.companyId}/pricings?location_ids=${CONFIG.locationId}`)),
+                    ]);
+                    // A service's price can differ per staff member: show the lowest as "from".
+                    const fromPrice = {};
+                    (pricingsResponse.data.pricings || []).forEach((p) => {
+                        const price = Number(p.new_min_price);
+                        if (!(p.variation_id in fromPrice) || price < fromPrice[p.variation_id]) fromPrice[p.variation_id] = price;
+                    });
+                    const location = (locationsResponse.data.locations || []).find((l) => String(l.id) === String(CONFIG.locationId));
+                    LOCATION_TIME_ZONE = location && location.time_zone ? location.time_zone : undefined;
+                    const variations = [];
+                    (dealsResponse.data.deals || []).forEach((deal) => (deal.variations || []).forEach((v) => {
+                        variations.push({ variationId: v.id, name: v.name, price: fromPrice[v.id], duration: v.duration });
+                    }));
+                    setCompany(companyResponse.data.company || companyResponse.data);
+                    setServices(variations);
+                    setEmployees(employeesResponse.data.employees || []);
+                    setMemberships(membershipsResponse.data.memberships || []);
+                    setUser({ token, clientId: clientResponse.data.client.id, name: session.data.user.first_name });
+                });
+            };
+
+            const days = React.useMemo(() => Array.from({ length: CONFIG.daysAhead }, (_, i) => new Date(Date.now() + (i + 1) * 86400000)), [user]);
+
+            // 2. Open times for the picked service, staff and day.
+            React.useEffect(() => {
+                if (!user || !variationId || !date) return;
+                setTime(null);
+                run('times', async () => setTimes(await openTimes({ date, variationId, employeeId })));
+            }, [variationId, employeeId, date]);
+
+            const service = services.find((s) => s.variationId === variationId);
+            const membership = memberships.find((m) => m.id === membershipId);
+
+            const loadOrder = async (id) => {
+                const response = await axios.get(api(`/orders/${id}`), userHeaders());
+                setOrder(response.data.order);
+                return response.data.order;
+            };
+
+            const loadCards = async (token) => {
+                const response = await axios.get(api('/intake/payment_methods'), orderHeaders(token));
+                const list = response.data.cards || [];
+                setCards(list);
+                if (list.length) setCardId(list[list.length - 1].id);
+            };
+
+            // 3. One POST /orders with the appointment and the membership. The appointment is held, not booked yet:
+            //    its time is taken out of everyone else's availability until hold_until, and the order stays payable
+            //    until expires_at. The response carries the access_token that pays the order.
+            const createOrder = () => {
+                const staff = time.employee_id || (time.employee_ids && time.employee_ids[0]) || employeeId || undefined;
+                const appointment = { variation_ids: [variationId], begin_at: time.begin_at };
+                if (staff) appointment.employee_id = parseInt(staff, 10);
+                const memberships = membership ? [{ membership_template_id: membership.id }] : [];
+                const labelFor = (key) => (/^appointments\[\d+\]$/.test(key) ? service.name : (/^memberships\[\d+\]$/.test(key) ? membership.name : null));
+                run('order', async () => {
+                    const response = await axios.post(api('/orders'), {
+                        location_id: parseInt(CONFIG.locationId, 10), client_id: user.clientId, lines: [],
+                        appointments: [appointment], memberships,
+                    }, userHeaders());
+                    setOrderToken(response.data.access_token);
+                    setOrder(response.data.order);
+                    const line = response.data.order.items.find((item) => item.begin_at) || {};
+                    setBooked({
+                        date, variationId, beginAt: time.begin_at, serviceName: service.name,
+                        employeeId: line.employee_id || staff, employeeName: line.employee_name,
+                        dayLabel: new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+                    });
+                    setExpired(false);
+                    await loadCards(response.data.access_token);
+                }, labelFor);
+            };
+
+            const startAgain = () => {
+                setOrder(null);
+                setOrderToken('');
+                setBooked(null);
+                setCards([]);
+                setExpired(false);
+                setErrors([]);
+                setTimes([]);
+                setTime(null);
+            };
+
+            // Cancelling releases the held time right away.
+            const cancelOrder = () => run('cancel', async () => {
+                await axios.delete(api(`/orders/${order.id}`), userHeaders());
+                startAgain();
+            });
+
+            const saveCard = async (paymentMethodId) => {
+                setErrors([]);
+                await axios.post(api('/intake/payment_methods'), { token: paymentMethodId }, orderHeaders());
+                await loadCards();
+            };
+
+            // 4. Pay the balance in full. The appointment and the membership are created only now, when the ticket
+            //    closes. If the held time lapsed and someone else booked it, the payment is refused (slot_unavailable)
+            //    and nothing is charged.
+            const pay = () => run('pay', async () => {
+                const response = await axios.post(api('/intake/transactions'), { card_id: cardId, amount: order.balance_due }, orderHeaders());
+                const closed = await loadOrder(order.id);
+                setPaid({ ticket: response.data.ticket, transaction: response.data.transaction, order: closed });
+            });
+
+            const appointmentLines = (o) => o.items.filter((item) => item.begin_at);
+            const holdUntil = order && (order.hold_until || appointmentLines(order).map((item) => item.hold_until).filter(Boolean)[0]);
+            const heldFor = holdUntil ? Math.max(0, Math.floor((new Date(holdUntil).getTime() - now) / 1000)) : null;
+            const expiresIn = order && order.expires_at ? Math.max(0, Math.floor((new Date(order.expires_at).getTime() - now) / 1000)) : null;
+
+            if (paid) {
+                return (
+                    <div className="max-w-3xl mx-auto">
+                        <div data-test="confirmation" className="bg-white rounded-lg shadow p-6">
+                            <h1 className="text-2xl font-bold text-green-700 mb-2">You're booked!</h1>
+                            <p className="mb-4">One payment of <b>{money(paid.transaction.amount)}</b> (card ending {paid.transaction.data && paid.transaction.data.last4}) on ticket <b data-test="ticket-id">#{paid.ticket.id}</b>, status <b data-test="ticket-status">{paid.ticket.status}</b>.</p>
+                            <table className="w-full text-sm">
+                                <tbody>
+                                    {paid.order.items.map((item) => (
+                                        <tr key={item.id} className="border-t" data-test={item.appointment_id ? 'booked-appointment' : 'booked-item'}>
+                                            <td className="py-2">
+                                                {item.service_name || item.name}
+                                                {item.begin_at ? <span className="text-gray-500"> · {item.employee_name ? `with ${item.employee_name} · ` : ''}{formatWhen(item.begin_at)}</span> : null}
+                                            </td>
+                                            <td className="py-2 text-gray-500">{item.appointment_id ? `appointment #${item.appointment_id}` : 'membership'}</td>
+                                            <td className="py-2 text-right">{money(item.amount)}</td>
+                                        </tr>
+                                    ))}
+                                    <tr className="border-t font-semibold"><td className="py-1" colSpan="2">Paid</td><td data-test="paid-amount" className="text-right">{money(paid.transaction.amount)}</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-3xl mx-auto">
+                    <h1 className="text-2xl font-bold mb-1">{company ? company.name : 'Book an appointment'}</h1>
+                    <p className="text-gray-600 mb-5">One order for an appointment and a membership, one payment. The time you pick is held for you while you pay, so no one else can book it.</p>
+                    <ErrorBox lines={errors} />
+
+                    {!user && (
+                        <Step number={1} title="Sign in">
+                            <form onSubmit={signIn} className="grid gap-3">
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                    <label className="grid gap-1 text-sm text-gray-600">MyTime domain
+                                        <input data-test="base-url" className="border rounded p-2 text-gray-900" placeholder="sandbox.mytime.com" value={settings.baseUrl} onChange={setSetting('baseUrl')} />
+                                    </label>
+                                    <label className="grid gap-1 text-sm text-gray-600">Company ID
+                                        <input data-test="company-id" className="border rounded p-2 text-gray-900" placeholder="770" value={settings.companyId} onChange={setSetting('companyId')} />
+                                    </label>
+                                    <label className="grid gap-1 text-sm text-gray-600">Location ID
+                                        <input data-test="location-id" className="border rounded p-2 text-gray-900" placeholder="1573" value={settings.locationId} onChange={setSetting('locationId')} />
+                                    </label>
+                                </div>
+                                <input data-test="email" className="border rounded p-2" placeholder="Email" value={login.email} onChange={(e) => setLogin(Object.assign({}, login, { email: e.target.value }))} />
+                                <input data-test="password" className="border rounded p-2" placeholder="Password" type="password" value={login.password} onChange={(e) => setLogin(Object.assign({}, login, { password: e.target.value }))} />
+                                <button data-test="sign-in" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={busy === 'signin'}>{busy === 'signin' ? 'Signing in…' : 'Sign in'}</button>
+                            </form>
+                        </Step>
+                    )}
+
+                    {user && !order && (
+                        <Step number={2} title={`Hi ${user.name}, pick a service and a time`}>
+                            <div className="grid gap-3 sm:grid-cols-2 mb-3">
+                                <label className="grid gap-1 text-sm text-gray-600">Service
+                                    <select data-test="service" className="border rounded p-2 text-gray-900" value={variationId || ''} onChange={(e) => setVariationId(parseInt(e.target.value, 10) || null)}>
+                                        <option value="">Choose a service</option>
+                                        {services.map((s) => <option key={s.variationId} value={s.variationId}>{s.name}{s.duration ? ` · ${s.duration} min` : ''}{s.price !== undefined ? ` · from ${money(s.price)}` : ''}</option>)}
+                                    </select>
+                                </label>
+                                <label className="grid gap-1 text-sm text-gray-600">Staff
+                                    <select data-test="staff" className="border rounded p-2 text-gray-900" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+                                        <option value="">Anyone</option>
+                                        {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.first_name || emp.name}</option>)}
+                                    </select>
+                                </label>
+                            </div>
+                            {variationId && (
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    {days.map((d) => {
+                                        const value = isoDate(d);
+                                        return (
+                                            <button key={value} data-test={`day-${value}`} onClick={() => setDate(value)}
+                                                className={`text-sm border rounded px-3 py-1 ${date === value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white'}`}>
+                                                {d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            {date && (
+                                <div data-test="times" className="flex flex-wrap gap-2 mb-3">
+                                    {busy === 'times' && <span className="text-sm text-gray-500">Loading times…</span>}
+                                    {busy !== 'times' && times.length === 0 && <span className="text-sm text-gray-500">No open times on this day.</span>}
+                                    {times.map((t) => (
+                                        <button key={`${t.begin_at}-${t.employee_id || ''}`} data-test={`time-${formatTime(t.begin_at)}`} onClick={() => setTime(t)}
+                                            className={`text-sm border rounded px-3 py-1 ${time && time.begin_at === t.begin_at ? 'bg-green-600 text-white border-green-600' : 'bg-white'}`}>
+                                            {formatTime(t.begin_at)}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            {memberships.length > 0 && (
+                                <div className="border-t pt-3 mt-2">
+                                    <div className="text-sm font-semibold mb-1">Add a membership to the same order</div>
+                                    {memberships.map((m) => (
+                                        <label key={m.id} className="flex items-center gap-2 text-sm py-1 text-indigo-800">
+                                            <input type="checkbox" data-test={`membership-${m.id}`} checked={membershipId === m.id}
+                                                onChange={() => setMembershipId(membershipId === m.id ? null : m.id)} />
+                                            <span>{m.name} {money(m.membership_price || m.price)}{m.payment_type === 1 ? '/month' : ''}{m.description ? ` · ${m.description}` : ''}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                            <button data-test="create-order" onClick={createOrder} disabled={!time || busy === 'order'}
+                                className="mt-3 bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50">
+                                {busy === 'order' ? 'Holding your time…' : `Hold ${time ? formatTime(time.begin_at) : 'this time'}${membership ? ' and add the membership' : ''}`}
+                            </button>
+                        </Step>
+                    )}
+
+                    {order && (
+                        <Step number={3} title={`Your order #${order.id}`}>
+                            {(expired || expiresIn === 0) && (
+                                <div data-test="expired" className="bg-amber-50 border border-amber-300 rounded p-3 mb-3 text-sm">
+                                    {ERROR_TEXT.order_expired}
+                                    <button data-test="start-again" onClick={startAgain} className="ml-3 underline">Start a new order</button>
+                                </div>
+                            )}
+                            {heldFor !== null && !expired && (
+                                <div data-test="held" className={`rounded p-3 mb-3 text-sm ${heldFor > 0 ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
+                                    {heldFor > 0
+                                        ? <span>Your time is held for <b>{countdown(heldFor)}</b>: no one else can book it while you pay.</span>
+                                        : <span>The hold on your time has ended. You can still pay: if the time is still free it is held again, otherwise the payment is refused and nothing is charged.</span>}
+                                    {expiresIn > 0 && <div className="text-gray-600 mt-1">The order itself stays open for {countdown(expiresIn)}.</div>}
+                                </div>
+                            )}
+                            <table data-test="order-items" className="w-full text-sm mb-3">
+                                <tbody>
+                                    {order.items.map((item) => (
+                                        <tr key={item.id} className="border-t">
+                                            <td className="py-2">
+                                                {item.service_name || item.name}
+                                                {item.begin_at ? <span className="text-gray-500"> · {item.employee_name ? `with ${item.employee_name} · ` : ''}{formatWhen(item.begin_at)}</span> : null}
+                                                {item.status === 'pending' && item.begin_at && <span className="ml-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">held</span>}
+                                            </td>
+                                            <td className="py-2 text-right">{money(item.amount)}</td>
+                                        </tr>
+                                    ))}
+                                    <tr className="border-t"><td className="py-1 text-gray-600">Subtotal</td><td className="text-right">{money(order.subtotal)}</td></tr>
+                                    <tr><td className="py-1 text-gray-600">Tax</td><td className="text-right">{money(order.tax)}</td></tr>
+                                    <tr className="font-semibold"><td className="py-1">Balance due</td><td data-test="balance" className="text-right">{money(order.balance_due)}</td></tr>
+                                </tbody>
+                            </table>
+                            {booked && <OtherClientView appointment={booked} />}
+                            <button data-test="cancel-order" onClick={cancelOrder} className="mt-3 text-sm text-gray-500 underline">Cancel this order (releases the time)</button>
+                        </Step>
+                    )}
+
+                    {order && (
+                        <Step number={4} title="Pay">
+                            {cards.length === 0 && <p className="text-sm text-gray-600">No saved cards yet.</p>}
+                            {cards.map((card) => (
+                                <label key={card.id} className="flex items-center gap-2 text-sm py-1">
+                                    <input type="radio" name="card" data-test={`card-${card.last4}`} checked={cardId === card.id} onChange={() => setCardId(card.id)} />
+                                    {card.brand} ending {card.last4} · exp {card.exp_month}/{card.exp_year}
+                                </label>
+                            ))}
+                            <AddCard stripeKey={company && company.stripe_key} onSave={saveCard} />
+                            <button data-test="pay" onClick={pay} disabled={!cardId || busy === 'pay' || expired}
+                                className="mt-4 bg-green-600 text-white px-6 py-2 rounded disabled:opacity-50">
+                                {busy === 'pay' ? 'Paying…' : `Pay ${money(order.balance_due)}`}
+                            </button>
+                        </Step>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
